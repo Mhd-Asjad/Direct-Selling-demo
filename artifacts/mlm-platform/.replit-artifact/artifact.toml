@@ -1,0 +1,33 @@
+kind = "web"
+previewPath = "/"
+title = "MLM Direct Selling Platform"
+version = "1.0.0"
+id = "artifacts/mlm-platform"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 5173
+
+[services.env]
+PORT = "5173"
+BASE_PATH = "/"
+
+[services.development]
+run = "pnpm --filter @workspace/mlm-platform run dev"
+
+[services.production]
+publicDir = "artifacts/mlm-platform/dist/public"
+serve = "static"
+
+[services.production.build]
+args = ["pnpm", "--filter", "@workspace/mlm-platform", "run", "build"]
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"

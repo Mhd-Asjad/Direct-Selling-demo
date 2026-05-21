@@ -1,0 +1,114 @@
+# 🚀 Product Requirements Document (PRD): MLM Direct Selling Platform MVP
+
+## 1. Executive Summary
+The MLM Direct Selling Platform is an enterprise-grade demonstration system built to showcase a highly sustainable Direct Selling + Binary Network model. This MVP provides a robust multi-step onboarding system, automated BFS tree placement, dual-sided commission tracking, a closed-loop coupon payout system, and a unique "Wash Reset" financial sustainability engine. 
+
+## 2. Technical Stack Definition
+To ensure a modern, sleek, and highly scalable architecture, the MVP will utilize:
+* **Frontend:** Next.js (App Router), React, Tailwind CSS v4
+* **UI Components:** shadcn/ui (highly reusable, configuration-driven UI)
+* **Backend:** Node.js, Express (or integrated Next.js API routes)
+* **Database:** MongoDB Atlas (leveraging flexible schemas for adjacency lists and tree structures)
+* **Hosting:** Render (Backend/DB processing) / Vercel (Frontend)
+
+---
+
+## 3. Module-by-Module Implementation Plan
+
+### Module 1: The Referral & Onboarding Engine (Multi-Step)
+Handles new user acquisition, enforcing verified referral linkage and payment before permanent tree placement.
+
+* **Features:**
+  * **Referral Link Parsing:** Capture `?ref=ID` and validate against the backend to display the masked legal name of the sponsor.
+  * **Multi-Step Registration Flow:** 1. *Information:* Capture personal details, contact info, and validated Referrer ID.
+    2. *Agreement & Package:* User selects their initial package and agrees to terms.
+    3. *Payment:* Processing the standard registration/activation fee (Up to **$30.00**).
+  * **Staging Queue:** Users remain in a `pending_registrations` state until the $30 payment is successfully processed via webhook.
+
+* **Reg Field Includes**
+  * Refferer Id : UUID
+  * Country Code : String (Auto detect via IP, user can change)
+  * Email Address: String 
+  * mobile number : phone number 
+  * Address 
+  * password 
+  * confirmation password
+
+### Module 2: Binary Network & Auto-Placement (Tree Engine)
+Manages the structural topology of the network.
+
+* **Features:**
+  * **Binary Node Limits:** Strict enforcement of a two-leg maximum (LEFT and RIGHT) per active node.
+  * **BFS Spillover Algorithm:** When a sponsor recruits a new member and immediate nodes are occupied, the system executes a Breadth-First Search (BFS) down the target leg to locate the first available extreme position.
+  * **Tree Visualization:** An interactive structural view for both Admin and User dashboards mapping `sponsor_id` (direct recruitment) and `parent_id` (tree placement).
+
+### Module 3: Commission & Volume Engine
+Calculates real-time business volume (BV) and assigns financial rewards based on strict business logic.
+
+* **Features:**
+  * **Upward Volume Propagation:** Any purchase (registration fee or courses) adds BV. This volume cascades upward, adding to the respective `leftBV` or `rightBV` of all ancestors in the network path.
+  * **Direct Referral Commission (10%):** Instantly allocated to the `sponsor_id`'s e-wallet upon the downline's payment confirmation.
+  * **Even-Leg Binary Matching Commission:** * Calculates the minimum matched volume across the left and right legs.
+    * Cycles trigger at **3,000 BV on each side**.
+    * A successful match credits a **$70 Row Completion Bonus** to the E-Wallet. Unmatched residual volume carries over.
+
+### Module 4: Financial Sustainability (The Wash Mechanism)
+A core administrative guardrail to prevent platform bankruptcy.
+
+* **Features:**
+  * **Revenue Split Allocation:** Every incoming dollar is automatically categorized:
+    * 60% Company Retention (Core ops/profits)
+    * 30% Overhead Expenses
+    * 10% Direct Commission Pool
+  * **Live Inflow/Outflow Ratio Dashboard:** Real-time tracking of `Total Commission Paid + Total Expenses` vs. `Total Inflow`.
+  * **The Wash Reset Engine:** If Outflow > Inflow, the system automatically (or via Admin manual trigger) fires a state-reset. It wipes all active unredeemed E-Wallet balances and cumulative commission records back to zero, stabilizing the business ratio.
+
+### Module 5: E-Wallet & Closed-Loop Coupon System
+Bypasses traditional fiat bank transfers by utilizing an internal closed-loop economy.
+
+* **Features:**
+  * **Secure E-Wallet:** Displays total earned, total spent, and current available balance.
+  * **PIN Authentication:** A secure 4-6 digit Wallet PIN required for any withdrawal actions.
+  * **Coupon Generator:** Users convert their E-Wallet balance into an Instant Coupon Code (e.g., `COUPON-A9B8C7-MLM`).
+  * **Redemption Layer:** Coupons are validated at checkout to offset the cost of new course inventory or registered daily items.
+
+### Module 6: Admin Control Center (The Nexus)
+A configuration-driven white-label admin panel for system oversight.
+
+* **Features:**
+  * **Network Oversight:** Full access to view the entire global tree, force-move nodes (manual override), and view individual user performance.
+  * **Financial Ledger:** View global BV totals, total coupon liabilities, and current wash-ratio metrics.
+  * **User Management:** Suspend accounts, manually approve payments, and reset security credentials.
+
+---
+
+## 4. User Roles & Permissions
+
+| Role | Access Level & Capabilities |
+| :--- | :--- |
+| **Pending User** | Can access Step 1 & 2 of the portal. Cannot access the dashboard or generate referral links. |
+| **Active Distributor** | Paid the $30 fee. Can access dashboard, generate referral links, view personal tree, track BV, and generate coupons. |
+| **System Admin** | Global tree access, manual tree manipulation, Wash Reset execution, global ledger viewing. |
+
+---
+
+## 5. Implementation Sprints (MVP Rollout)
+
+* **Sprint 1: Core Foundation & Onboarding**
+  * Database schema setup (Users, Tree, Wallets).
+  * Multi-step registration UI with shadcn/ui.
+  * Link validation and $30 payment gateway sandbox integration.
+* **Sprint 2: Network & Placement Engine**
+  * BFS Spillover logic implementation.
+  * Upward volume propagation recursive functions.
+  * Visual tree component for user dashboards.
+* **Sprint 3: Financials & Commissions**
+  * 10% Direct Commission logic.
+  * 3,000 BV Matching cycle logic ($70 payout trigger).
+  * E-wallet ledger and Wallet PIN security.
+  * Coupon generation and redemption endpoints.
+* **Sprint 4: Admin Oversight & Wash Mechanism**
+  * Admin dashboard UI.
+  * Inflow/Outflow financial calculators.
+  * Wash Reset routine (database wiping/archiving mechanism).
+  * End-to-end user flow testing.

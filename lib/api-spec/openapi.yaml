@@ -3,20 +3,34 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: MLM Direct Selling Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: users
+    description: User management
+  - name: network
+    description: Binary network tree
+  - name: commissions
+    description: Commission tracking
+  - name: wallet
+    description: E-Wallet and coupons
+  - name: admin
+    description: Admin control center
+  - name: dashboard
+    description: Dashboard summaries
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +38,999 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── AUTH ──────────────────────────────────────────────────────────────────
+  /auth/verify-referral:
+    get:
+      operationId: verifyReferral
+      tags: [auth]
+      summary: Validate referral ID and return masked sponsor name
+      parameters:
+        - name: refId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Valid referral
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferralInfo"
+        "404":
+          description: Not found
+
+  /auth/register:
+    post:
+      operationId: registerUser
+      tags: [auth]
+      summary: Register a new user (creates pending registration)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegistrationInput"
+      responses:
+        "201":
+          description: Pending registration created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingRegistration"
+        "400":
+          description: Invalid input
+
+  /auth/login:
+    post:
+      operationId: loginUser
+      tags: [auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+
+  /auth/logout:
+    post:
+      operationId: logoutUser
+      tags: [auth]
+      summary: Logout current session
+      responses:
+        "204":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  # ── USERS ─────────────────────────────────────────────────────────────────
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List all users (admin)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, active, suspended]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Update user profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/{id}/status:
+    patch:
+      operationId: updateUserStatus
+      tags: [users]
+      summary: Suspend or activate a user (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserStatusUpdate"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/{id}/approve-payment:
+    post:
+      operationId: approvePayment
+      tags: [users]
+      summary: Manually approve payment and activate user (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Activated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  # ── NETWORK ───────────────────────────────────────────────────────────────
+  /network/tree:
+    get:
+      operationId: getNetworkTree
+      tags: [network]
+      summary: Get full binary network tree (admin) or user subtree
+      parameters:
+        - name: rootUserId
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Network tree
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TreeNode"
+
+  /network/tree/{userId}:
+    get:
+      operationId: getUserTree
+      tags: [network]
+      summary: Get binary subtree rooted at a user
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User subtree
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TreeNode"
+
+  /network/place:
+    post:
+      operationId: placeNode
+      tags: [network]
+      summary: Force-move a node to a new parent position (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NodePlacementInput"
+      responses:
+        "200":
+          description: Updated node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TreeNode"
+
+  /network/stats:
+    get:
+      operationId: getNetworkStats
+      tags: [network]
+      summary: Get network growth stats
+      responses:
+        "200":
+          description: Network statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkStats"
+
+  # ── COMMISSIONS ───────────────────────────────────────────────────────────
+  /commissions:
+    get:
+      operationId: listCommissions
+      tags: [commissions]
+      summary: List commissions for current user (or all if admin)
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [direct_referral, binary_match]
+      responses:
+        "200":
+          description: Commission list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Commission"
+
+  /commissions/stats:
+    get:
+      operationId: getCommissionStats
+      tags: [commissions]
+      summary: Get commission stats for current user
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Commission statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommissionStats"
+
+  # ── WALLET ────────────────────────────────────────────────────────────────
+  /wallet:
+    get:
+      operationId: getWallet
+      tags: [wallet]
+      summary: Get current user e-wallet
+      responses:
+        "200":
+          description: E-wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+
+  /wallet/transactions:
+    get:
+      operationId: listWalletTransactions
+      tags: [wallet]
+      summary: List wallet transactions
+      responses:
+        "200":
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WalletTransaction"
+
+  /wallet/pin/verify:
+    post:
+      operationId: verifyWalletPin
+      tags: [wallet]
+      summary: Verify wallet PIN before sensitive actions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletPinInput"
+      responses:
+        "200":
+          description: PIN verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinVerifyResult"
+        "401":
+          description: Invalid PIN
+
+  /wallet/pin:
+    patch:
+      operationId: updateWalletPin
+      tags: [wallet]
+      summary: Set or update wallet PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletPinUpdate"
+      responses:
+        "200":
+          description: PIN updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+
+  /wallet/coupons:
+    get:
+      operationId: listCoupons
+      tags: [wallet]
+      summary: List coupons for current user
+      responses:
+        "200":
+          description: Coupon list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Coupon"
+    post:
+      operationId: createCoupon
+      tags: [wallet]
+      summary: Generate a coupon from e-wallet balance (requires PIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CouponInput"
+      responses:
+        "201":
+          description: Coupon created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Coupon"
+        "400":
+          description: Insufficient balance
+
+  /wallet/coupons/redeem:
+    post:
+      operationId: redeemCoupon
+      tags: [wallet]
+      summary: Redeem a coupon code at checkout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CouponRedeemInput"
+      responses:
+        "200":
+          description: Coupon redeemed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Coupon"
+        "400":
+          description: Invalid or already used coupon
+
+  # ── ADMIN ─────────────────────────────────────────────────────────────────
+  /admin/financial-stats:
+    get:
+      operationId: getFinancialStats
+      tags: [admin]
+      summary: Get global financial inflow/outflow stats
+      responses:
+        "200":
+          description: Financial stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinancialStats"
+
+  /admin/wash-reset:
+    post:
+      operationId: executeWashReset
+      tags: [admin]
+      summary: Execute the Wash Reset — wipes unredeemed wallet balances
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WashResetInput"
+      responses:
+        "200":
+          description: Wash reset executed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WashResetResult"
+
+  /admin/bv-stats:
+    get:
+      operationId: getGlobalBvStats
+      tags: [admin]
+      summary: Get global business volume totals
+      responses:
+        "200":
+          description: BV stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlobalBvStats"
+
+  /admin/wash-history:
+    get:
+      operationId: listWashHistory
+      tags: [admin]
+      summary: List past wash reset events
+      responses:
+        "200":
+          description: Wash history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WashEvent"
+
+  # ── DASHBOARD ────────────────────────────────────────────────────────────
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get personal dashboard summary (BV, commissions, downline counts)
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Get recent activity feed for current user
+      responses:
+        "200":
+          description: Activity feed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    # ── AUTH SCHEMAS ──────────────────────────────────────────────────────
+    ReferralInfo:
+      type: object
+      required: [referrerId, maskedName, isValid]
+      properties:
+        referrerId:
+          type: string
+        maskedName:
+          type: string
+        isValid:
+          type: boolean
+
+    RegistrationInput:
+      type: object
+      required: [email, password, confirmPassword, referrerId, firstName, lastName, mobileNumber, address, countryCode, packageType]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        confirmPassword:
+          type: string
+        referrerId:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        mobileNumber:
+          type: string
+        address:
+          type: string
+        countryCode:
+          type: string
+        packageType:
+          type: string
+          enum: [starter, pro, elite]
+        agreedToTerms:
+          type: boolean
+
+    PendingRegistration:
+      type: object
+      required: [id, email, status]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        status:
+          type: string
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    # ── USER SCHEMAS ──────────────────────────────────────────────────────
+    User:
+      type: object
+      required: [id, email, firstName, lastName, status, role, referralCode, createdAt]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        mobileNumber:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        countryCode:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, active, suspended]
+        role:
+          type: string
+          enum: [distributor, admin]
+        referralCode:
+          type: string
+        referrerId:
+          type: ["string", "null"]
+        packageType:
+          type: ["string", "null"]
+        leftBv:
+          type: number
+        rightBv:
+          type: number
+        createdAt:
+          type: string
+
+    UserUpdate:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        mobileNumber:
+          type: string
+        address:
+          type: string
+        countryCode:
+          type: string
+
+    UserStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, suspended]
+
+    # ── NETWORK SCHEMAS ───────────────────────────────────────────────────
+    TreeNode:
+      type: object
+      required: [id, userId, firstName, lastName, status, leftBv, rightBv, depth]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        firstName:
+          type: string
+        lastName:
+          type: string
+        status:
+          type: string
+        packageType:
+          type: ["string", "null"]
+        sponsorId:
+          type: ["integer", "null"]
+        parentId:
+          type: ["integer", "null"]
+        leg:
+          type: ["string", "null"]
+          enum: [left, right, null]
+        leftChildId:
+          type: ["integer", "null"]
+        rightChildId:
+          type: ["integer", "null"]
+        leftBv:
+          type: number
+        rightBv:
+          type: number
+        depth:
+          type: integer
+
+    NodePlacementInput:
+      type: object
+      required: [userId, newParentId, leg]
+      properties:
+        userId:
+          type: integer
+        newParentId:
+          type: integer
+        leg:
+          type: string
+          enum: [left, right]
+
+    NetworkStats:
+      type: object
+      required: [totalNodes, activeNodes, pendingNodes, totalLeftBv, totalRightBv]
+      properties:
+        totalNodes:
+          type: integer
+        activeNodes:
+          type: integer
+        pendingNodes:
+          type: integer
+        totalLeftBv:
+          type: number
+        totalRightBv:
+          type: number
+
+    # ── COMMISSION SCHEMAS ────────────────────────────────────────────────
+    Commission:
+      type: object
+      required: [id, userId, type, amount, sourceUserId, createdAt]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        type:
+          type: string
+          enum: [direct_referral, binary_match]
+        amount:
+          type: number
+        sourceUserId:
+          type: integer
+        sourceUserName:
+          type: ["string", "null"]
+        bvMatched:
+          type: ["number", "null"]
+        createdAt:
+          type: string
+
+    CommissionStats:
+      type: object
+      required: [totalEarned, directReferralTotal, binaryMatchTotal, pendingCycles, leftBv, rightBv, matchedBv, residualLeftBv, residualRightBv]
+      properties:
+        totalEarned:
+          type: number
+        directReferralTotal:
+          type: number
+        binaryMatchTotal:
+          type: number
+        pendingCycles:
+          type: integer
+        leftBv:
+          type: number
+        rightBv:
+          type: number
+        matchedBv:
+          type: number
+        residualLeftBv:
+          type: number
+        residualRightBv:
+          type: number
+
+    # ── WALLET SCHEMAS ────────────────────────────────────────────────────
+    Wallet:
+      type: object
+      required: [id, userId, totalEarned, totalSpent, availableBalance, hasPin, createdAt]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        totalEarned:
+          type: number
+        totalSpent:
+          type: number
+        availableBalance:
+          type: number
+        hasPin:
+          type: boolean
+        createdAt:
+          type: string
+
+    WalletTransaction:
+      type: object
+      required: [id, walletId, type, amount, description, createdAt]
+      properties:
+        id:
+          type: integer
+        walletId:
+          type: integer
+        type:
+          type: string
+          enum: [credit, debit]
+        amount:
+          type: number
+        description:
+          type: string
+        referenceId:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    WalletPinInput:
+      type: object
+      required: [pin]
+      properties:
+        pin:
+          type: string
+
+    WalletPinUpdate:
+      type: object
+      required: [pin]
+      properties:
+        pin:
+          type: string
+        currentPin:
+          type: ["string", "null"]
+
+    PinVerifyResult:
+      type: object
+      required: [valid]
+      properties:
+        valid:
+          type: boolean
+
+    Coupon:
+      type: object
+      required: [id, userId, code, amount, status, createdAt]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        code:
+          type: string
+        amount:
+          type: number
+        status:
+          type: string
+          enum: [active, redeemed, expired]
+        redeemedAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    CouponInput:
+      type: object
+      required: [amount, pin]
+      properties:
+        amount:
+          type: number
+        pin:
+          type: string
+
+    CouponRedeemInput:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+
+    # ── ADMIN SCHEMAS ─────────────────────────────────────────────────────
+    FinancialStats:
+      type: object
+      required: [totalInflow, totalCommissionPaid, totalExpenses, totalOutflow, washRatio, isInsolvent, retentionPool, overheadPool, commissionPool]
+      properties:
+        totalInflow:
+          type: number
+        totalCommissionPaid:
+          type: number
+        totalExpenses:
+          type: number
+        totalOutflow:
+          type: number
+        washRatio:
+          type: number
+        isInsolvent:
+          type: boolean
+        retentionPool:
+          type: number
+        overheadPool:
+          type: number
+        commissionPool:
+          type: number
+
+    WashResetInput:
+      type: object
+      required: [adminPin]
+      properties:
+        adminPin:
+          type: string
+        reason:
+          type: ["string", "null"]
+
+    WashResetResult:
+      type: object
+      required: [success, walletsReset, commissionsReset, totalAmountWiped, executedAt]
+      properties:
+        success:
+          type: boolean
+        walletsReset:
+          type: integer
+        commissionsReset:
+          type: integer
+        totalAmountWiped:
+          type: number
+        executedAt:
+          type: string
+
+    WashEvent:
+      type: object
+      required: [id, executedBy, walletsReset, totalAmountWiped, reason, createdAt]
+      properties:
+        id:
+          type: integer
+        executedBy:
+          type: integer
+        walletsReset:
+          type: integer
+        totalAmountWiped:
+          type: number
+        reason:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    GlobalBvStats:
+      type: object
+      required: [globalLeftBv, globalRightBv, totalMatchedCycles, totalBonusPaid, activeMemberCount]
+      properties:
+        globalLeftBv:
+          type: number
+        globalRightBv:
+          type: number
+        totalMatchedCycles:
+          type: integer
+        totalBonusPaid:
+          type: number
+        activeMemberCount:
+          type: integer
+
+    # ── DASHBOARD SCHEMAS ─────────────────────────────────────────────────
+    DashboardSummary:
+      type: object
+      required: [userId, leftBv, rightBv, directReferrals, totalDownline, walletBalance, totalEarned, pendingCycles, nextCycleLeftNeeded, nextCycleRightNeeded]
+      properties:
+        userId:
+          type: integer
+        leftBv:
+          type: number
+        rightBv:
+          type: number
+        directReferrals:
+          type: integer
+        totalDownline:
+          type: integer
+        walletBalance:
+          type: number
+        totalEarned:
+          type: number
+        pendingCycles:
+          type: integer
+        nextCycleLeftNeeded:
+          type: number
+        nextCycleRightNeeded:
+          type: number
+
+    ActivityItem:
+      type: object
+      required: [id, type, message, amount, createdAt]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [registration, commission_earned, binary_match, coupon_created, coupon_redeemed, wash_reset]
+        message:
+          type: string
+        amount:
+          type: ["number", "null"]
+        relatedUserId:
+          type: ["integer", "null"]
+        relatedUserName:
+          type: ["string", "null"]
+        createdAt:
+          type: string
