@@ -10,6 +10,7 @@ import NetworkPage from "@/pages/network";
 import CommissionsPage from "@/pages/commissions";
 import WalletPage from "@/pages/wallet";
 import AdminPage from "@/pages/admin";
+import BuyPage from "@/pages/buy";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,6 +32,7 @@ function Router() {
       <Route path="/commissions" component={CommissionsPage} />
       <Route path="/wallet" component={WalletPage} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/buy" component={BuyPage} />
       <Route component={NotFound} />
     </Switch>
   );

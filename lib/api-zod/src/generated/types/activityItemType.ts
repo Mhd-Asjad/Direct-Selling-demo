@@ -16,4 +16,5 @@ export const ActivityItemType = {
   coupon_created: 'coupon_created',
   coupon_redeemed: 'coupon_redeemed',
   wash_reset: 'wash_reset',
+  course_purchase: 'course_purchase',
 } as const;

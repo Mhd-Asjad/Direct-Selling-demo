@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
-import { db, financialLedgerTable, washEventsTable, walletsTable, commissionsTable, networkNodesTable, usersTable } from "@workspace/db";
+import { db, financialLedgerTable, washEventsTable, walletsTable, commissionsTable, networkNodesTable, usersTable, coursesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { ExecuteWashResetBody } from "@workspace/api-zod";
+import { ExecuteWashResetBody, CreateAdminCourseBody, UpdateAdminCourseBody } from "@workspace/api-zod";
 import bcrypt from "bcrypt";
 
 const router: IRouter = Router();
@@ -163,6 +163,92 @@ router.get("/admin/wash-history", async (_req, res): Promise<void> => {
         createdAt: e.createdAt.toISOString(),
       })),
   );
+});
+
+function mapCourse(c: typeof coursesTable.$inferSelect) {
+  return {
+    id: c.id,
+    name: c.name,
+    description: c.description ?? null,
+    price: parseFloat(c.price),
+    minPrice: c.minPrice ? parseFloat(c.minPrice) : null,
+    maxPrice: c.maxPrice ? parseFloat(c.maxPrice) : null,
+    bvAmount: parseFloat(c.bvAmount ?? "3000"),
+    isActive: c.isActive,
+    createdAt: c.createdAt.toISOString(),
+  };
+}
+
+router.get("/admin/courses", async (_req, res): Promise<void> => {
+  const courses = await db.select().from(coursesTable);
+  res.json(courses.map(mapCourse));
+});
+
+router.post("/admin/courses", async (req, res): Promise<void> => {
+  const body = CreateAdminCourseBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: body.error.message });
+    return;
+  }
+
+  const { name, description, price, minPrice, maxPrice, bvAmount } = body.data;
+
+  const [course] = await db
+    .insert(coursesTable)
+    .values({
+      name,
+      description: description ?? null,
+      price: String(price),
+      minPrice: minPrice != null ? String(minPrice) : null,
+      maxPrice: maxPrice != null ? String(maxPrice) : null,
+      bvAmount: bvAmount != null ? String(bvAmount) : "3000",
+      isActive: true,
+    })
+    .returning();
+
+  res.status(201).json(mapCourse(course!));
+});
+
+router.patch("/admin/courses/:id", async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  const body = UpdateAdminCourseBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: body.error.message });
+    return;
+  }
+
+  const updates: Partial<typeof coursesTable.$inferInsert> = {};
+  if (body.data.name !== undefined) updates.name = body.data.name;
+  if (body.data.description !== undefined) updates.description = body.data.description;
+  if (body.data.price !== undefined) updates.price = String(body.data.price);
+  if (body.data.minPrice !== undefined) updates.minPrice = String(body.data.minPrice);
+  if (body.data.maxPrice !== undefined) updates.maxPrice = String(body.data.maxPrice);
+  if (body.data.bvAmount !== undefined) updates.bvAmount = String(body.data.bvAmount);
+  if (body.data.isActive !== undefined) updates.isActive = body.data.isActive;
+
+  const [updated] = await db
+    .update(coursesTable)
+    .set(updates)
+    .where(eq(coursesTable.id, id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Course not found" });
+    return;
+  }
+
+  res.json(mapCourse(updated));
+});
+
+router.delete("/admin/courses/:id", async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+
+  await db
+    .update(coursesTable)
+    .set({ isActive: false })
+    .where(eq(coursesTable.id, id));
+
+  res.json({ success: true });
 });
 
 export default router;

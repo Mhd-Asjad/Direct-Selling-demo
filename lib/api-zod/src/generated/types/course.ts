@@ -5,17 +5,18 @@
  * MLM Direct Selling Platform API
  * OpenAPI spec version: 0.1.0
  */
-import type { CouponStatus } from './couponStatus';
 
-export interface Coupon {
+export interface Course {
   id: number;
-  userId: number;
+  name: string;
   /** @nullable */
-  courseId?: number | null;
-  code: string;
-  amount: number;
-  status: CouponStatus;
+  description?: string | null;
+  price: number;
   /** @nullable */
-  redeemedAt?: string | null;
+  minPrice?: number | null;
+  /** @nullable */
+  maxPrice?: number | null;
+  bvAmount: number;
+  isActive: boolean;
   createdAt: string;
 }

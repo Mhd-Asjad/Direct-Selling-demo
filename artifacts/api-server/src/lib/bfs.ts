@@ -1,5 +1,5 @@
 import { db, networkNodesTable } from "@workspace/db";
-import { eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 /**
  * BFS Spillover: Finds the first available child slot (left or right)
@@ -21,19 +21,20 @@ export async function bfsPlacement(
 
     if (!node) continue;
 
-    // Check preferred leg first
-    const firstLeg = preferredLeg;
-    const secondLeg = preferredLeg === "left" ? "right" : "left";
-
     const leftChild = node.leftChildId;
     const rightChild = node.rightChildId;
 
     if (!leftChild) return { parentId: node.id, leg: "left" };
     if (!rightChild) return { parentId: node.id, leg: "right" };
 
-    // Both occupied — enqueue children
-    queue.push(leftChild);
-    queue.push(rightChild);
+    // Both occupied — enqueue children (preferred leg first)
+    if (preferredLeg === "left") {
+      queue.push(leftChild);
+      queue.push(rightChild);
+    } else {
+      queue.push(rightChild);
+      queue.push(leftChild);
+    }
   }
 
   return null;
@@ -41,7 +42,6 @@ export async function bfsPlacement(
 
 /**
  * Propagates BV upward from a placed node to all ancestors.
- * leg: which leg the new volume was added on (relative to each ancestor).
  */
 export async function propagateBv(
   nodeId: number,
@@ -64,7 +64,6 @@ export async function propagateBv(
     if (!current) break;
 
     if (current.leftChildId === childId) {
-      // new volume came from left sub-tree
       await db
         .update(networkNodesTable)
         .set({ leftBv: String(parseFloat(current.leftBv ?? "0") + bvAmount) })
@@ -79,4 +78,31 @@ export async function propagateBv(
     childId = currentId;
     currentId = current.parentId;
   }
+}
+
+/**
+ * Returns an ordered list of ancestor userIds (nearest first) for a given node.
+ * Used to check binary cycles after BV propagation.
+ */
+export async function getAncestorUserIds(nodeId: number): Promise<number[]> {
+  const [startNode] = await db
+    .select()
+    .from(networkNodesTable)
+    .where(eq(networkNodesTable.id, nodeId));
+  if (!startNode) return [];
+
+  const ancestors: number[] = [];
+  let currentId: number | null = startNode.parentId;
+
+  while (currentId !== null && currentId !== undefined) {
+    const [current] = await db
+      .select()
+      .from(networkNodesTable)
+      .where(eq(networkNodesTable.id, currentId));
+    if (!current) break;
+    ancestors.push(current.userId);
+    currentId = current.parentId;
+  }
+
+  return ancestors;
 }

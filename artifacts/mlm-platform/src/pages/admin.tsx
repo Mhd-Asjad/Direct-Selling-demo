@@ -10,6 +10,10 @@ import {
   useExecuteWashReset,
   usePlaceNode,
   useGetNetworkStats, getGetNetworkStatsQueryKey,
+  useListAdminCourses, getListAdminCoursesQueryKey,
+  useCreateAdminCourse,
+  useUpdateAdminCourse,
+  useDeleteAdminCourse,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -22,19 +26,28 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
-  TrendingUp, TrendingDown, Users, ShieldAlert, BarChart3,
+  TrendingUp, TrendingDown, Users, BarChart3,
   RefreshCw, Zap, AlertTriangle, CheckCircle, Ban, UserCheck,
-  Network, DollarSign, Activity, History,
+  Network, DollarSign, Activity, History, BookOpen, Plus, Pencil, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
-const TABS = ["Overview", "Users", "Network", "BV Stats", "Wash Reset"] as const;
+const TABS = ["Overview", "Users", "Network", "BV Stats", "Courses", "Wash Reset"] as const;
 type Tab = typeof TABS[number];
 
 const washSchema = z.object({
   adminPin: z.string().min(4, "Enter admin PIN"),
   reason: z.string().optional(),
+});
+
+const courseSchema = z.object({
+  name: z.string().min(1, "Name required"),
+  description: z.string().optional(),
+  price: z.coerce.number().min(0, "Price must be ≥ 0"),
+  minPrice: z.coerce.number().optional(),
+  maxPrice: z.coerce.number().optional(),
+  bvAmount: z.coerce.number().optional(),
 });
 
 export default function AdminPage() {
@@ -46,6 +59,7 @@ export default function AdminPage() {
   const [confirmWash, setConfirmWash] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [courseDialog, setCourseDialog] = useState<{ open: boolean; mode: "create" | "edit"; id?: number }>({ open: false, mode: "create" });
 
   const { data: financialStats } = useGetFinancialStats({
     query: { queryKey: getGetFinancialStatsQueryKey(), enabled: !!isAdmin },
@@ -71,6 +85,10 @@ export default function AdminPage() {
 
   const { data: networkStats } = useGetNetworkStats({
     query: { queryKey: getGetNetworkStatsQueryKey(), enabled: !!isAdmin },
+  });
+
+  const { data: courses, isLoading: coursesLoading } = useListAdminCourses({
+    query: { queryKey: getListAdminCoursesQueryKey(), enabled: !!isAdmin && activeTab === "Courses" },
   });
 
   const updateStatus = useUpdateUserStatus({
@@ -102,9 +120,47 @@ export default function AdminPage() {
     },
   });
 
+  const createCourse = useCreateAdminCourse({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListAdminCoursesQueryKey() });
+        toast({ title: "Course created" });
+        setCourseDialog({ open: false, mode: "create" });
+        courseForm.reset();
+      },
+      onError: (e: any) => toast({ title: "Failed to create course", description: e?.message, variant: "destructive" }),
+    },
+  });
+
+  const updateCourse = useUpdateAdminCourse({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListAdminCoursesQueryKey() });
+        toast({ title: "Course updated" });
+        setCourseDialog({ open: false, mode: "create" });
+        courseForm.reset();
+      },
+      onError: (e: any) => toast({ title: "Failed to update course", description: e?.message, variant: "destructive" }),
+    },
+  });
+
+  const deleteCourse = useDeleteAdminCourse({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListAdminCoursesQueryKey() });
+        toast({ title: "Course deactivated" });
+      },
+    },
+  });
+
   const washForm = useForm({
     resolver: zodResolver(washSchema),
     defaultValues: { adminPin: "", reason: "" },
+  });
+
+  const courseForm = useForm<z.infer<typeof courseSchema>>({
+    resolver: zodResolver(courseSchema),
+    defaultValues: { name: "", description: "", price: 0, minPrice: undefined, maxPrice: undefined, bvAmount: 3000 },
   });
 
   useEffect(() => {
@@ -113,6 +169,26 @@ export default function AdminPage() {
 
   const washRatio = financialStats?.washRatio ?? 0;
   const ratioPercent = Math.min(100, washRatio * 100);
+
+  function openEditCourse(c: { id: number; name: string; description?: string | null; price: number; minPrice?: number | null; maxPrice?: number | null; bvAmount: number }) {
+    courseForm.reset({
+      name: c.name,
+      description: c.description ?? "",
+      price: c.price,
+      minPrice: c.minPrice ?? undefined,
+      maxPrice: c.maxPrice ?? undefined,
+      bvAmount: c.bvAmount,
+    });
+    setCourseDialog({ open: true, mode: "edit", id: c.id });
+  }
+
+  function onCourseSubmit(v: z.infer<typeof courseSchema>) {
+    if (courseDialog.mode === "create") {
+      createCourse.mutate({ data: v });
+    } else if (courseDialog.id) {
+      updateCourse.mutate({ id: courseDialog.id, data: v });
+    }
+  }
 
   return (
     <Layout>
@@ -131,7 +207,7 @@ export default function AdminPage() {
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-1 bg-secondary rounded-lg p-1 w-fit">
+        <div className="flex gap-1 bg-secondary rounded-lg p-1 w-fit flex-wrap">
           {TABS.map((tab) => (
             <button
               key={tab}
@@ -401,6 +477,112 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* COURSES TAB */}
+        {activeTab === "Courses" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-primary" />
+                <h2 className="text-sm font-semibold text-foreground">Course Catalog</h2>
+                <span className="text-xs text-muted-foreground">({courses?.length ?? 0} courses)</span>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => {
+                  courseForm.reset({ name: "", description: "", price: 0, bvAmount: 3000 });
+                  setCourseDialog({ open: true, mode: "create" });
+                }}
+                data-testid="button-add-course"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Course
+              </Button>
+            </div>
+
+            <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Course</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Price</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Price Range</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">BV</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Status</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {coursesLoading ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <tr key={i}>
+                        <td colSpan={6} className="px-4 py-3">
+                          <div className="h-4 bg-secondary rounded animate-pulse w-full" />
+                        </td>
+                      </tr>
+                    ))
+                  ) : courses?.map((c) => (
+                    <tr key={c.id} className="hover:bg-secondary/20 transition-colors" data-testid={`course-row-${c.id}`}>
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-medium text-foreground">{c.name}</p>
+                          {c.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{c.description}</p>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm font-semibold text-foreground">${c.price.toFixed(2)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-muted-foreground">
+                          {c.minPrice != null || c.maxPrice != null
+                            ? `$${(c.minPrice ?? 0).toFixed(0)} – $${(c.maxPrice ?? c.price).toFixed(0)}`
+                            : "—"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-primary font-medium">{c.bvAmount.toFixed(0)} BV</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                          c.isActive ? "bg-accent/20 text-accent" : "bg-secondary text-muted-foreground"
+                        )}>
+                          {c.isActive ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2"
+                            onClick={() => openEditCourse(c)}
+                            data-testid={`button-edit-course-${c.id}`}
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                          {c.isActive && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-destructive border-destructive/30 hover:bg-destructive/10"
+                              onClick={() => deleteCourse.mutate({ id: c.id })}
+                              disabled={deleteCourse.isPending}
+                              data-testid={`button-deactivate-course-${c.id}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {courses?.length === 0 && !coursesLoading && (
+                <div className="p-8 text-center text-sm text-muted-foreground">No courses yet — add one above</div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* WASH RESET TAB */}
         {activeTab === "Wash Reset" && (
           <div className="space-y-4">
@@ -433,7 +615,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Wash history */}
             <div className="bg-card border border-card-border rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-border flex items-center gap-2">
                 <History className="w-4 h-4 text-muted-foreground" />
@@ -493,6 +674,83 @@ export default function AdminPage() {
               )} />
               <Button type="submit" className="w-full bg-destructive hover:bg-destructive/90" disabled={washReset.isPending} data-testid="button-confirm-wash">
                 {washReset.isPending ? "Executing..." : "Confirm Wash Reset"}
+              </Button>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Course create/edit dialog */}
+      <Dialog open={courseDialog.open} onOpenChange={(v) => setCourseDialog((p) => ({ ...p, open: v }))}>
+        <DialogContent className="bg-card border-card-border max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-primary" />
+              {courseDialog.mode === "create" ? "Add Course" : "Edit Course"}
+            </DialogTitle>
+            <DialogDescription>
+              {courseDialog.mode === "create"
+                ? "Create a new course available for purchase via referral links."
+                : "Update course details. Price and BV changes apply to future purchases only."}
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...courseForm}>
+            <form onSubmit={courseForm.handleSubmit(onCourseSubmit)} className="space-y-3">
+              <FormField control={courseForm.control} name="name" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Course Name</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. Leadership Mastery" data-testid="input-course-name" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={courseForm.control} name="description" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description (optional)</FormLabel>
+                  <FormControl><Input {...field} placeholder="Short course description" data-testid="input-course-description" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={courseForm.control} name="price" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Price ($)</FormLabel>
+                    <FormControl><Input {...field} type="number" step="0.01" placeholder="299.00" data-testid="input-course-price" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={courseForm.control} name="bvAmount" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>BV Amount</FormLabel>
+                    <FormControl><Input {...field} type="number" placeholder="3000" data-testid="input-course-bv" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={courseForm.control} name="minPrice" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Min Price (optional)</FormLabel>
+                    <FormControl><Input {...field} type="number" step="0.01" placeholder="199.00" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={courseForm.control} name="maxPrice" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Max Price (optional)</FormLabel>
+                    <FormControl><Input {...field} type="number" step="0.01" placeholder="499.00" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={createCourse.isPending || updateCourse.isPending}
+                data-testid="button-save-course"
+              >
+                {(createCourse.isPending || updateCourse.isPending)
+                  ? "Saving..."
+                  : courseDialog.mode === "create" ? "Create Course" : "Save Changes"}
               </Button>
             </form>
           </Form>

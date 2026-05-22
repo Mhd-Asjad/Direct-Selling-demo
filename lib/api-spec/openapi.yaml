@@ -22,6 +22,8 @@ tags:
     description: E-Wallet and coupons
   - name: admin
     description: Admin control center
+  - name: courses
+    description: Course catalog and referral purchases
   - name: dashboard
     description: Dashboard summaries
 
@@ -544,6 +546,146 @@ paths:
                 items:
                   $ref: "#/components/schemas/WashEvent"
 
+  /admin/courses:
+    get:
+      operationId: listAdminCourses
+      tags: [admin]
+      summary: List all courses (admin)
+      responses:
+        "200":
+          description: Course list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Course"
+    post:
+      operationId: createAdminCourse
+      tags: [admin]
+      summary: Create a new course (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCourseInput"
+      responses:
+        "201":
+          description: Course created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Course"
+
+  /admin/courses/{id}:
+    patch:
+      operationId: updateAdminCourse
+      tags: [admin]
+      summary: Update a course (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCourseInput"
+      responses:
+        "200":
+          description: Updated course
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Course"
+    delete:
+      operationId: deleteAdminCourse
+      tags: [admin]
+      summary: Deactivate/delete a course (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  # ── COURSES ───────────────────────────────────────────────────────────────
+  /courses:
+    get:
+      operationId: listCourses
+      tags: [courses]
+      summary: List active courses available for purchase
+      responses:
+        "200":
+          description: Active courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Course"
+
+  /courses/referral:
+    get:
+      operationId: getCourseReferral
+      tags: [courses]
+      summary: Get course + sponsor info for a referral link
+      parameters:
+        - name: courseId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: refCode
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Course referral info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseReferralInfo"
+        "404":
+          description: Not found
+
+  /courses/purchase:
+    post:
+      operationId: purchaseCourse
+      tags: [courses]
+      summary: Purchase a course via referral link — places user, assigns 3000 BV, generates coupon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoursePurchaseInput"
+      responses:
+        "201":
+          description: Course purchased
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoursePurchaseResult"
+        "400":
+          description: Invalid input or insufficient balance
+
   # ── DASHBOARD ────────────────────────────────────────────────────────────
   /dashboard/summary:
     get:
@@ -881,6 +1023,8 @@ components:
           type: integer
         userId:
           type: integer
+        courseId:
+          type: ["integer", "null"]
         code:
           type: string
         amount:
@@ -1023,7 +1167,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [registration, commission_earned, binary_match, coupon_created, coupon_redeemed, wash_reset]
+          enum: [registration, commission_earned, binary_match, coupon_created, coupon_redeemed, wash_reset, course_purchase]
         message:
           type: string
         amount:
@@ -1034,3 +1178,99 @@ components:
           type: ["string", "null"]
         createdAt:
           type: string
+
+    # ── COURSE SCHEMAS ─────────────────────────────────────────────────────
+    Course:
+      type: object
+      required: [id, name, price, bvAmount, isActive, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        price:
+          type: number
+        minPrice:
+          type: ["number", "null"]
+        maxPrice:
+          type: ["number", "null"]
+        bvAmount:
+          type: number
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    CreateCourseInput:
+      type: object
+      required: [name, price]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        minPrice:
+          type: number
+        maxPrice:
+          type: number
+        bvAmount:
+          type: number
+
+    UpdateCourseInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        minPrice:
+          type: number
+        maxPrice:
+          type: number
+        bvAmount:
+          type: number
+        isActive:
+          type: boolean
+
+    CourseReferralInfo:
+      type: object
+      required: [course, sponsorCode, sponsorName, isValid]
+      properties:
+        course:
+          $ref: "#/components/schemas/Course"
+        sponsorCode:
+          type: string
+        sponsorName:
+          type: string
+        isValid:
+          type: boolean
+
+    CoursePurchaseInput:
+      type: object
+      required: [courseId, referralCode]
+      properties:
+        courseId:
+          type: integer
+        referralCode:
+          type: string
+        pin:
+          type: string
+
+    CoursePurchaseResult:
+      type: object
+      required: [couponCode, bvAssigned, directCommission, course]
+      properties:
+        couponCode:
+          type: string
+        bvAssigned:
+          type: number
+        directCommission:
+          type: number
+        course:
+          $ref: "#/components/schemas/Course"

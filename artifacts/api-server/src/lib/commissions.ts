@@ -1,5 +1,5 @@
 import { db, usersTable, networkNodesTable, commissionsTable, walletsTable, walletTransactionsTable, activityFeedTable, financialLedgerTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { logger } from "./logger";
 
 const BINARY_CYCLE_THRESHOLD = 3000;
@@ -23,7 +23,7 @@ export async function awardDirectReferralCommission(
     sourceUserId: newUserId,
   });
 
-  await creditWallet(sponsorId, commissionAmount, `Direct referral commission (10%) from new member #${newUserId}`, `commission_${newUserId}`);
+  await creditWallet(sponsorId, commissionAmount, `Direct referral commission (10%) from user #${newUserId}`, `commission_${newUserId}`);
 
   await db.insert(activityFeedTable).values({
     userId: sponsorId,
@@ -42,8 +42,9 @@ export async function awardDirectReferralCommission(
 }
 
 /**
- * Checks if a node has completed a binary matching cycle (3000 BV each side).
- * Awards $70 bonus per completed cycle and carries over residual.
+ * Checks if a node has completed a binary matching cycle (3,000 BV each side).
+ * Awards exactly $70 per completed cycle. Tracks paid cycles via commissions table
+ * to avoid double-paying. Awards $70 only when both Left AND Right legs match at 3,000 BV.
  */
 export async function checkAndAwardBinaryCycles(userId: number): Promise<void> {
   const [node] = await db
@@ -60,31 +61,33 @@ export async function checkAndAwardBinaryCycles(userId: number): Promise<void> {
 
   if (!user || user.status !== "active") return;
 
-  const leftBv = parseFloat(node.leftBv ?? "0");
-  const rightBv = parseFloat(node.rightBv ?? "0");
-  const residualLeft = parseFloat(user.residualLeftBv ?? "0");
-  const residualRight = parseFloat(user.residualRightBv ?? "0");
+  const totalLeftBv = parseFloat(node.leftBv ?? "0");
+  const totalRightBv = parseFloat(node.rightBv ?? "0");
 
-  const effectiveLeft = leftBv + residualLeft;
-  const effectiveRight = rightBv + residualRight;
+  // Both sides must have BV for a match to be possible
+  if (totalLeftBv < BINARY_CYCLE_THRESHOLD || totalRightBv < BINARY_CYCLE_THRESHOLD) return;
 
-  const cycles = Math.floor(Math.min(effectiveLeft, effectiveRight) / BINARY_CYCLE_THRESHOLD);
-  if (cycles <= 0) return;
+  // Count already-paid cycles to avoid double-paying
+  const paidCommissions = await db
+    .select()
+    .from(commissionsTable)
+    .where(and(eq(commissionsTable.userId, userId), eq(commissionsTable.type, "binary_match")));
 
-  const bonusAmount = cycles * BINARY_CYCLE_BONUS;
-  const matchedBv = cycles * BINARY_CYCLE_THRESHOLD;
+  const paidCycles = paidCommissions.reduce((sum, c) => {
+    return sum + (c.bvMatched ? Math.floor(parseFloat(c.bvMatched) / BINARY_CYCLE_THRESHOLD) : 1);
+  }, 0);
 
-  // Carry over residual
-  const newResidualLeft = effectiveLeft - matchedBv;
-  const newResidualRight = effectiveRight - matchedBv;
+  // Unmatched BV = total accumulated - already consumed by past cycles
+  const consumedBv = paidCycles * BINARY_CYCLE_THRESHOLD;
+  const unmatchedLeft = Math.max(0, totalLeftBv - consumedBv);
+  const unmatchedRight = Math.max(0, totalRightBv - consumedBv);
 
-  await db
-    .update(usersTable)
-    .set({
-      residualLeftBv: String(newResidualLeft),
-      residualRightBv: String(newResidualRight),
-    })
-    .where(eq(usersTable.id, userId));
+  // A new cycle fires only when BOTH sides have >= 3,000 BV unmatched
+  const newCycles = Math.floor(Math.min(unmatchedLeft, unmatchedRight) / BINARY_CYCLE_THRESHOLD);
+  if (newCycles <= 0) return;
+
+  const bonusAmount = newCycles * BINARY_CYCLE_BONUS;
+  const matchedBv = newCycles * BINARY_CYCLE_THRESHOLD;
 
   await db.insert(commissionsTable).values({
     userId,
@@ -94,23 +97,23 @@ export async function checkAndAwardBinaryCycles(userId: number): Promise<void> {
     bvMatched: String(matchedBv),
   });
 
-  await creditWallet(userId, bonusAmount, `Binary match bonus ($${BINARY_CYCLE_BONUS} x ${cycles} cycles)`, `binary_${Date.now()}`);
+  await creditWallet(userId, bonusAmount, `Binary match bonus ($${BINARY_CYCLE_BONUS} × ${newCycles} cycle${newCycles > 1 ? "s" : ""})`, `binary_${Date.now()}`);
 
   await db.insert(activityFeedTable).values({
     userId,
     type: "binary_match",
-    message: `Binary match! ${cycles} cycle${cycles > 1 ? "s" : ""} completed — earned $${bonusAmount.toFixed(2)}`,
+    message: `Binary match! ${newCycles} cycle${newCycles > 1 ? "s" : ""} completed — earned $${bonusAmount.toFixed(2)}`,
     amount: String(bonusAmount),
   });
 
   await db.insert(financialLedgerTable).values({
     type: "commission_paid",
     amount: String(bonusAmount),
-    description: `Binary match bonus (${cycles} cycles)`,
+    description: `Binary match bonus (${newCycles} cycle${newCycles > 1 ? "s" : ""} × $${BINARY_CYCLE_BONUS})`,
     userId,
   });
 
-  logger.info({ userId, cycles, bonusAmount }, "Binary match commission awarded");
+  logger.info({ userId, newCycles, bonusAmount, unmatchedLeft, unmatchedRight }, "Binary match commission awarded");
 }
 
 export async function creditWallet(
@@ -125,17 +128,14 @@ export async function creditWallet(
     .where(eq(walletsTable.userId, userId));
 
   if (!wallet) {
-    // Create wallet
-    await db.insert(walletsTable).values({
-      userId,
-      totalEarned: String(amount),
-      availableBalance: String(amount),
-    });
-    // Insert tx
     const [newWallet] = await db
-      .select()
-      .from(walletsTable)
-      .where(eq(walletsTable.userId, userId));
+      .insert(walletsTable)
+      .values({
+        userId,
+        totalEarned: String(amount),
+        availableBalance: String(amount),
+      })
+      .returning();
     if (newWallet) {
       await db.insert(walletTransactionsTable).values({
         walletId: newWallet.id,

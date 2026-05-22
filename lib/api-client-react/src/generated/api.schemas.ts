@@ -253,6 +253,8 @@ export const CouponStatus = {
 export interface Coupon {
   id: number;
   userId: number;
+  /** @nullable */
+  courseId?: number | null;
   code: string;
   amount: number;
   status: CouponStatus;
@@ -337,6 +339,7 @@ export const ActivityItemType = {
   coupon_created: 'coupon_created',
   coupon_redeemed: 'coupon_redeemed',
   wash_reset: 'wash_reset',
+  course_purchase: 'course_purchase',
 } as const;
 
 export interface ActivityItem {
@@ -350,6 +353,60 @@ export interface ActivityItem {
   /** @nullable */
   relatedUserName?: string | null;
   createdAt: string;
+}
+
+export interface Course {
+  id: number;
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  price: number;
+  /** @nullable */
+  minPrice?: number | null;
+  /** @nullable */
+  maxPrice?: number | null;
+  bvAmount: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateCourseInput {
+  name: string;
+  description?: string;
+  price: number;
+  minPrice?: number;
+  maxPrice?: number;
+  bvAmount?: number;
+}
+
+export interface UpdateCourseInput {
+  name?: string;
+  description?: string;
+  price?: number;
+  minPrice?: number;
+  maxPrice?: number;
+  bvAmount?: number;
+  isActive?: boolean;
+}
+
+export interface CourseReferralInfo {
+  course: Course;
+  sponsorCode: string;
+  sponsorName: string;
+  isValid: boolean;
+}
+
+export interface CoursePurchaseInput {
+  courseId: number;
+  referralCode: string;
+  pin?: string;
+}
+
+export interface CoursePurchaseResult {
+  couponCode: string;
+  bvAssigned: number;
+  directCommission: number;
+  course: Course;
 }
 
 export type VerifyReferralParams = {
@@ -398,5 +455,14 @@ export type GetCommissionStatsParams = {
  * @nullable
  */
 userId?: number | null;
+};
+
+export type DeleteAdminCourse200 = {
+  success?: boolean;
+};
+
+export type GetCourseReferralParams = {
+courseId: number;
+refCode: string;
 };
 

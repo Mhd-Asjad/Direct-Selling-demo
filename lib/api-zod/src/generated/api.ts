@@ -439,6 +439,7 @@ export const UpdateWalletPinResponse = zod.object({
 export const ListCouponsResponseItem = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
+  "courseId": zod.number().nullish(),
   "code": zod.string(),
   "amount": zod.number(),
   "status": zod.enum(['active', 'redeemed', 'expired']),
@@ -467,6 +468,7 @@ export const RedeemCouponBody = zod.object({
 export const RedeemCouponResponse = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
+  "courseId": zod.number().nullish(),
   "code": zod.string(),
   "amount": zod.number(),
   "status": zod.enum(['active', 'redeemed', 'expired']),
@@ -535,6 +537,131 @@ export const ListWashHistoryResponse = zod.array(ListWashHistoryResponseItem)
 
 
 /**
+ * @summary List all courses (admin)
+ */
+export const ListAdminCoursesResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "price": zod.number(),
+  "minPrice": zod.number().nullish(),
+  "maxPrice": zod.number().nullish(),
+  "bvAmount": zod.number(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string()
+})
+export const ListAdminCoursesResponse = zod.array(ListAdminCoursesResponseItem)
+
+
+/**
+ * @summary Create a new course (admin)
+ */
+export const CreateAdminCourseBody = zod.object({
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "price": zod.number(),
+  "minPrice": zod.number().optional(),
+  "maxPrice": zod.number().optional(),
+  "bvAmount": zod.number().optional()
+})
+
+
+/**
+ * @summary Update a course (admin)
+ */
+export const UpdateAdminCourseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateAdminCourseBody = zod.object({
+  "name": zod.string().optional(),
+  "description": zod.string().optional(),
+  "price": zod.number().optional(),
+  "minPrice": zod.number().optional(),
+  "maxPrice": zod.number().optional(),
+  "bvAmount": zod.number().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const UpdateAdminCourseResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "price": zod.number(),
+  "minPrice": zod.number().nullish(),
+  "maxPrice": zod.number().nullish(),
+  "bvAmount": zod.number(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Deactivate/delete a course (admin)
+ */
+export const DeleteAdminCourseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteAdminCourseResponse = zod.object({
+  "success": zod.boolean().optional()
+})
+
+
+/**
+ * @summary List active courses available for purchase
+ */
+export const ListCoursesResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "price": zod.number(),
+  "minPrice": zod.number().nullish(),
+  "maxPrice": zod.number().nullish(),
+  "bvAmount": zod.number(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string()
+})
+export const ListCoursesResponse = zod.array(ListCoursesResponseItem)
+
+
+/**
+ * @summary Get course + sponsor info for a referral link
+ */
+export const GetCourseReferralQueryParams = zod.object({
+  "courseId": zod.coerce.number(),
+  "refCode": zod.coerce.string()
+})
+
+export const GetCourseReferralResponse = zod.object({
+  "course": zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "price": zod.number(),
+  "minPrice": zod.number().nullish(),
+  "maxPrice": zod.number().nullish(),
+  "bvAmount": zod.number(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string()
+}),
+  "sponsorCode": zod.string(),
+  "sponsorName": zod.string(),
+  "isValid": zod.boolean()
+})
+
+
+/**
+ * @summary Purchase a course via referral link — places user, assigns 3000 BV, generates coupon
+ */
+export const PurchaseCourseBody = zod.object({
+  "courseId": zod.number(),
+  "referralCode": zod.string(),
+  "pin": zod.string().optional()
+})
+
+
+/**
  * @summary Get personal dashboard summary (BV, commissions, downline counts)
  */
 export const GetDashboardSummaryResponse = zod.object({
@@ -556,7 +683,7 @@ export const GetDashboardSummaryResponse = zod.object({
  */
 export const GetRecentActivityResponseItem = zod.object({
   "id": zod.number(),
-  "type": zod.enum(['registration', 'commission_earned', 'binary_match', 'coupon_created', 'coupon_redeemed', 'wash_reset']),
+  "type": zod.enum(['registration', 'commission_earned', 'binary_match', 'coupon_created', 'coupon_redeemed', 'wash_reset', 'course_purchase']),
   "message": zod.string(),
   "amount": zod.number().nullable(),
   "relatedUserId": zod.number().nullish(),

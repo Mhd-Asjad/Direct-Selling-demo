@@ -6,6 +6,7 @@ import networkRouter from "./network";
 import commissionsRouter from "./commissions";
 import walletRouter from "./wallet";
 import adminRouter from "./admin";
+import coursesRouter from "./courses";
 import dashboardRouter from "./dashboard";
 
 const router: IRouter = Router();
@@ -17,6 +18,7 @@ router.use(networkRouter);
 router.use(commissionsRouter);
 router.use(walletRouter);
 router.use(adminRouter);
+router.use(coursesRouter);
 router.use(dashboardRouter);
 
 export default router;

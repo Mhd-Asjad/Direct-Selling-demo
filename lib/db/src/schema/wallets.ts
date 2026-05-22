@@ -26,6 +26,7 @@ export const walletTransactionsTable = pgTable("wallet_transactions", {
 export const couponsTable = pgTable("coupons", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
+  courseId: integer("course_id"), // FK to courses(id) — null for manually created coupons
   code: text("code").notNull().unique(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   status: text("status").notNull().default("active"), // active | redeemed | expired
