@@ -30,6 +30,8 @@ import type {
   CoursePurchaseInput,
   CoursePurchaseResult,
   CourseReferralInfo,
+  CreateCheckoutSessionInput,
+  CreateCheckoutSessionResponse,
   CreateCourseInput,
   DashboardSummary,
   DeleteAdminCourse200,
@@ -53,6 +55,8 @@ import type {
   User,
   UserStatusUpdate,
   UserUpdate,
+  VerifyCheckoutSessionInput,
+  VerifyCheckoutSessionResponse,
   VerifyReferralParams,
   Wallet,
   WalletPinInput,
@@ -524,6 +528,148 @@ export function useGetCurrentUser<TData = Awaited<ReturnType<typeof getCurrentUs
 
 
 
+
+export const getStripeCreateCheckoutSessionUrl = () => {
+
+
+
+
+  return `/api/auth/create-checkout-session`
+}
+
+/**
+ * @summary Create a Stripe Checkout session for registration fee
+ */
+export const stripeCreateCheckoutSession = async (createCheckoutSessionInput: CreateCheckoutSessionInput, options?: RequestInit): Promise<CreateCheckoutSessionResponse> => {
+
+  return customFetch<CreateCheckoutSessionResponse>(getStripeCreateCheckoutSessionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createCheckoutSessionInput,)
+  }
+);}
+
+
+
+
+export const getStripeCreateCheckoutSessionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stripeCreateCheckoutSession>>, TError,{data: BodyType<CreateCheckoutSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof stripeCreateCheckoutSession>>, TError,{data: BodyType<CreateCheckoutSessionInput>}, TContext> => {
+
+const mutationKey = ['stripeCreateCheckoutSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof stripeCreateCheckoutSession>>, {data: BodyType<CreateCheckoutSessionInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  stripeCreateCheckoutSession(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StripeCreateCheckoutSessionMutationResult = NonNullable<Awaited<ReturnType<typeof stripeCreateCheckoutSession>>>
+    export type StripeCreateCheckoutSessionMutationBody = BodyType<CreateCheckoutSessionInput>
+    export type StripeCreateCheckoutSessionMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a Stripe Checkout session for registration fee
+ */
+export const useStripeCreateCheckoutSession = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stripeCreateCheckoutSession>>, TError,{data: BodyType<CreateCheckoutSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof stripeCreateCheckoutSession>>,
+        TError,
+        {data: BodyType<CreateCheckoutSessionInput>},
+        TContext
+      > => {
+      return useMutation(getStripeCreateCheckoutSessionMutationOptions(options));
+    }
+
+export const getStripeVerifyCheckoutSessionUrl = () => {
+
+
+
+
+  return `/api/auth/verify-checkout-session`
+}
+
+/**
+ * @summary Verify checkout session and activate user
+ */
+export const stripeVerifyCheckoutSession = async (verifyCheckoutSessionInput: VerifyCheckoutSessionInput, options?: RequestInit): Promise<VerifyCheckoutSessionResponse> => {
+
+  return customFetch<VerifyCheckoutSessionResponse>(getStripeVerifyCheckoutSessionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      verifyCheckoutSessionInput,)
+  }
+);}
+
+
+
+
+export const getStripeVerifyCheckoutSessionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stripeVerifyCheckoutSession>>, TError,{data: BodyType<VerifyCheckoutSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof stripeVerifyCheckoutSession>>, TError,{data: BodyType<VerifyCheckoutSessionInput>}, TContext> => {
+
+const mutationKey = ['stripeVerifyCheckoutSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof stripeVerifyCheckoutSession>>, {data: BodyType<VerifyCheckoutSessionInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  stripeVerifyCheckoutSession(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StripeVerifyCheckoutSessionMutationResult = NonNullable<Awaited<ReturnType<typeof stripeVerifyCheckoutSession>>>
+    export type StripeVerifyCheckoutSessionMutationBody = BodyType<VerifyCheckoutSessionInput>
+    export type StripeVerifyCheckoutSessionMutationError = ErrorType<void>
+
+    /**
+ * @summary Verify checkout session and activate user
+ */
+export const useStripeVerifyCheckoutSession = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stripeVerifyCheckoutSession>>, TError,{data: BodyType<VerifyCheckoutSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof stripeVerifyCheckoutSession>>,
+        TError,
+        {data: BodyType<VerifyCheckoutSessionInput>},
+        TContext
+      > => {
+      return useMutation(getStripeVerifyCheckoutSessionMutationOptions(options));
+    }
 
 export const getListUsersUrl = (params?: ListUsersParams,) => {
   const normalizedParams = new URLSearchParams();

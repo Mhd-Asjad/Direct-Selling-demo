@@ -129,6 +129,48 @@ paths:
         "401":
           description: Not authenticated
 
+  /auth/create-checkout-session:
+    post:
+      operationId: stripeCreateCheckoutSession
+      tags: [auth]
+      summary: Create a Stripe Checkout session for registration fee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCheckoutSessionInput"
+      responses:
+        "200":
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateCheckoutSessionResponse"
+        "400":
+          description: Bad request
+
+  /auth/verify-checkout-session:
+    post:
+      operationId: stripeVerifyCheckoutSession
+      tags: [auth]
+      summary: Verify checkout session and activate user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyCheckoutSessionInput"
+      responses:
+        "200":
+          description: User activated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyCheckoutSessionResponse"
+        "400":
+          description: Invalid session
+
   # ── USERS ─────────────────────────────────────────────────────────────────
   /users:
     get:
@@ -738,7 +780,7 @@ components:
 
     RegistrationInput:
       type: object
-      required: [email, password, confirmPassword, referrerId, firstName, lastName, mobileNumber, address, countryCode, packageType]
+      required: [email, password, confirmPassword, referrerId, firstName, lastName, mobileNumber, address, countryCode, username, state, city, dob, gender, profilePhoto, govtIdProof, agreedToTerms]
       properties:
         email:
           type: string
@@ -761,6 +803,29 @@ components:
         packageType:
           type: string
           enum: [starter, pro, elite]
+        username:
+          type: string
+        state:
+          type: string
+        city:
+          type: string
+        dob:
+          type: string
+        gender:
+          type: string
+        profilePhoto:
+          type: string
+        govtIdProof:
+          type: string
+        sponsorReferralId:
+          type: string
+        placementSide:
+          type: string
+          enum: [left, right]
+        usdtAddress:
+          type: string
+        bankDetails:
+          type: string
         agreedToTerms:
           type: boolean
 
@@ -772,6 +837,38 @@ components:
           type: integer
         email:
           type: string
+        status:
+          type: string
+
+    CreateCheckoutSessionInput:
+      type: object
+      required: [userId]
+      properties:
+        userId:
+          type: integer
+
+    CreateCheckoutSessionResponse:
+      type: object
+      required: [sessionId, url]
+      properties:
+        sessionId:
+          type: string
+        url:
+          type: string
+
+    VerifyCheckoutSessionInput:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+
+    VerifyCheckoutSessionResponse:
+      type: object
+      required: [success, status]
+      properties:
+        success:
+          type: boolean
         status:
           type: string
 
@@ -787,7 +884,7 @@ components:
     # ── USER SCHEMAS ──────────────────────────────────────────────────────
     User:
       type: object
-      required: [id, email, firstName, lastName, status, role, referralCode, createdAt]
+      required: [id, email, firstName, lastName, status, isPaid, role, referralCode, createdAt]
       properties:
         id:
           type: integer
@@ -806,6 +903,8 @@ components:
         status:
           type: string
           enum: [pending, active, suspended]
+        isPaid:
+          type: boolean
         role:
           type: string
           enum: [distributor, admin]
@@ -814,6 +913,28 @@ components:
         referrerId:
           type: ["string", "null"]
         packageType:
+          type: ["string", "null"]
+        username:
+          type: ["string", "null"]
+        state:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        dob:
+          type: ["string", "null"]
+        gender:
+          type: ["string", "null"]
+        profilePhoto:
+          type: ["string", "null"]
+        govtIdProof:
+          type: ["string", "null"]
+        sponsorReferralId:
+          type: ["string", "null"]
+        placementSide:
+          type: ["string", "null"]
+        usdtAddress:
+          type: ["string", "null"]
+        bankDetails:
           type: ["string", "null"]
         leftBv:
           type: number

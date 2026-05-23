@@ -20,12 +20,35 @@ export interface User {
   /** @nullable */
   countryCode?: string | null;
   status: UserStatus;
+  isPaid: boolean;
   role: UserRole;
   referralCode: string;
   /** @nullable */
   referrerId?: string | null;
   /** @nullable */
   packageType?: string | null;
+  /** @nullable */
+  username?: string | null;
+  /** @nullable */
+  state?: string | null;
+  /** @nullable */
+  city?: string | null;
+  /** @nullable */
+  dob?: string | null;
+  /** @nullable */
+  gender?: string | null;
+  /** @nullable */
+  profilePhoto?: string | null;
+  /** @nullable */
+  govtIdProof?: string | null;
+  /** @nullable */
+  sponsorReferralId?: string | null;
+  /** @nullable */
+  placementSide?: string | null;
+  /** @nullable */
+  usdtAddress?: string | null;
+  /** @nullable */
+  bankDetails?: string | null;
   leftBv?: number;
   rightBv?: number;
   createdAt: string;

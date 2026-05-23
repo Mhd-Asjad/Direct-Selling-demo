@@ -43,8 +43,19 @@ export const RegisterUserBody = zod.object({
   "mobileNumber": zod.string(),
   "address": zod.string(),
   "countryCode": zod.string(),
-  "packageType": zod.enum(['starter', 'pro', 'elite']),
-  "agreedToTerms": zod.boolean().optional()
+  "packageType": zod.enum(['starter', 'pro', 'elite']).optional(),
+  "username": zod.string(),
+  "state": zod.string(),
+  "city": zod.string(),
+  "dob": zod.string(),
+  "gender": zod.string(),
+  "profilePhoto": zod.string(),
+  "govtIdProof": zod.string(),
+  "sponsorReferralId": zod.string().optional(),
+  "placementSide": zod.enum(['left', 'right']).optional(),
+  "usdtAddress": zod.string().optional(),
+  "bankDetails": zod.string().optional(),
+  "agreedToTerms": zod.boolean()
 })
 
 
@@ -65,10 +76,22 @@ export const LoginUserResponse = zod.object({
   "address": zod.string().nullish(),
   "countryCode": zod.string().nullish(),
   "status": zod.enum(['pending', 'active', 'suspended']),
+  "isPaid": zod.boolean(),
   "role": zod.enum(['distributor', 'admin']),
   "referralCode": zod.string(),
   "referrerId": zod.string().nullish(),
   "packageType": zod.string().nullish(),
+  "username": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "dob": zod.string().nullish(),
+  "gender": zod.string().nullish(),
+  "profilePhoto": zod.string().nullish(),
+  "govtIdProof": zod.string().nullish(),
+  "sponsorReferralId": zod.string().nullish(),
+  "placementSide": zod.string().nullish(),
+  "usdtAddress": zod.string().nullish(),
+  "bankDetails": zod.string().nullish(),
   "leftBv": zod.number().optional(),
   "rightBv": zod.number().optional(),
   "createdAt": zod.string()
@@ -87,13 +110,51 @@ export const GetCurrentUserResponse = zod.object({
   "address": zod.string().nullish(),
   "countryCode": zod.string().nullish(),
   "status": zod.enum(['pending', 'active', 'suspended']),
+  "isPaid": zod.boolean(),
   "role": zod.enum(['distributor', 'admin']),
   "referralCode": zod.string(),
   "referrerId": zod.string().nullish(),
   "packageType": zod.string().nullish(),
+  "username": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "dob": zod.string().nullish(),
+  "gender": zod.string().nullish(),
+  "profilePhoto": zod.string().nullish(),
+  "govtIdProof": zod.string().nullish(),
+  "sponsorReferralId": zod.string().nullish(),
+  "placementSide": zod.string().nullish(),
+  "usdtAddress": zod.string().nullish(),
+  "bankDetails": zod.string().nullish(),
   "leftBv": zod.number().optional(),
   "rightBv": zod.number().optional(),
   "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Create a Stripe Checkout session for registration fee
+ */
+export const StripeCreateCheckoutSessionBody = zod.object({
+  "userId": zod.number()
+})
+
+export const StripeCreateCheckoutSessionResponse = zod.object({
+  "sessionId": zod.string(),
+  "url": zod.string()
+})
+
+
+/**
+ * @summary Verify checkout session and activate user
+ */
+export const StripeVerifyCheckoutSessionBody = zod.object({
+  "sessionId": zod.string()
+})
+
+export const StripeVerifyCheckoutSessionResponse = zod.object({
+  "success": zod.boolean(),
+  "status": zod.string()
 })
 
 
@@ -114,10 +175,22 @@ export const ListUsersResponseItem = zod.object({
   "address": zod.string().nullish(),
   "countryCode": zod.string().nullish(),
   "status": zod.enum(['pending', 'active', 'suspended']),
+  "isPaid": zod.boolean(),
   "role": zod.enum(['distributor', 'admin']),
   "referralCode": zod.string(),
   "referrerId": zod.string().nullish(),
   "packageType": zod.string().nullish(),
+  "username": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "dob": zod.string().nullish(),
+  "gender": zod.string().nullish(),
+  "profilePhoto": zod.string().nullish(),
+  "govtIdProof": zod.string().nullish(),
+  "sponsorReferralId": zod.string().nullish(),
+  "placementSide": zod.string().nullish(),
+  "usdtAddress": zod.string().nullish(),
+  "bankDetails": zod.string().nullish(),
   "leftBv": zod.number().optional(),
   "rightBv": zod.number().optional(),
   "createdAt": zod.string()
@@ -141,10 +214,22 @@ export const GetUserResponse = zod.object({
   "address": zod.string().nullish(),
   "countryCode": zod.string().nullish(),
   "status": zod.enum(['pending', 'active', 'suspended']),
+  "isPaid": zod.boolean(),
   "role": zod.enum(['distributor', 'admin']),
   "referralCode": zod.string(),
   "referrerId": zod.string().nullish(),
   "packageType": zod.string().nullish(),
+  "username": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "dob": zod.string().nullish(),
+  "gender": zod.string().nullish(),
+  "profilePhoto": zod.string().nullish(),
+  "govtIdProof": zod.string().nullish(),
+  "sponsorReferralId": zod.string().nullish(),
+  "placementSide": zod.string().nullish(),
+  "usdtAddress": zod.string().nullish(),
+  "bankDetails": zod.string().nullish(),
   "leftBv": zod.number().optional(),
   "rightBv": zod.number().optional(),
   "createdAt": zod.string()
@@ -175,10 +260,22 @@ export const UpdateUserResponse = zod.object({
   "address": zod.string().nullish(),
   "countryCode": zod.string().nullish(),
   "status": zod.enum(['pending', 'active', 'suspended']),
+  "isPaid": zod.boolean(),
   "role": zod.enum(['distributor', 'admin']),
   "referralCode": zod.string(),
   "referrerId": zod.string().nullish(),
   "packageType": zod.string().nullish(),
+  "username": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "dob": zod.string().nullish(),
+  "gender": zod.string().nullish(),
+  "profilePhoto": zod.string().nullish(),
+  "govtIdProof": zod.string().nullish(),
+  "sponsorReferralId": zod.string().nullish(),
+  "placementSide": zod.string().nullish(),
+  "usdtAddress": zod.string().nullish(),
+  "bankDetails": zod.string().nullish(),
   "leftBv": zod.number().optional(),
   "rightBv": zod.number().optional(),
   "createdAt": zod.string()
@@ -205,10 +302,22 @@ export const UpdateUserStatusResponse = zod.object({
   "address": zod.string().nullish(),
   "countryCode": zod.string().nullish(),
   "status": zod.enum(['pending', 'active', 'suspended']),
+  "isPaid": zod.boolean(),
   "role": zod.enum(['distributor', 'admin']),
   "referralCode": zod.string(),
   "referrerId": zod.string().nullish(),
   "packageType": zod.string().nullish(),
+  "username": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "dob": zod.string().nullish(),
+  "gender": zod.string().nullish(),
+  "profilePhoto": zod.string().nullish(),
+  "govtIdProof": zod.string().nullish(),
+  "sponsorReferralId": zod.string().nullish(),
+  "placementSide": zod.string().nullish(),
+  "usdtAddress": zod.string().nullish(),
+  "bankDetails": zod.string().nullish(),
   "leftBv": zod.number().optional(),
   "rightBv": zod.number().optional(),
   "createdAt": zod.string()
@@ -231,10 +340,22 @@ export const ApprovePaymentResponse = zod.object({
   "address": zod.string().nullish(),
   "countryCode": zod.string().nullish(),
   "status": zod.enum(['pending', 'active', 'suspended']),
+  "isPaid": zod.boolean(),
   "role": zod.enum(['distributor', 'admin']),
   "referralCode": zod.string(),
   "referrerId": zod.string().nullish(),
   "packageType": zod.string().nullish(),
+  "username": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "dob": zod.string().nullish(),
+  "gender": zod.string().nullish(),
+  "profilePhoto": zod.string().nullish(),
+  "govtIdProof": zod.string().nullish(),
+  "sponsorReferralId": zod.string().nullish(),
+  "placementSide": zod.string().nullish(),
+  "usdtAddress": zod.string().nullish(),
+  "bankDetails": zod.string().nullish(),
   "leftBv": zod.number().optional(),
   "rightBv": zod.number().optional(),
   "createdAt": zod.string()
