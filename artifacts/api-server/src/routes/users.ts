@@ -110,6 +110,8 @@ router.patch("/users/:id/status", async (req, res): Promise<void> => {
   res.json(formatUser(updated));
 });
 
+import { activateUser } from "../lib/activation";
+
 router.post("/users/:id/approve-payment", async (req, res): Promise<void> => {
   const params = ApprovePaymentParams.safeParse(req.params);
   if (!params.success) {
@@ -117,125 +119,12 @@ router.post("/users/:id/approve-payment", async (req, res): Promise<void> => {
     return;
   }
 
-  const [user] = await db
-    .select()
-    .from(usersTable)
-    .where(eq(usersTable.id, params.data.id));
-
-  if (!user) {
-    res.status(404).json({ error: "User not found" });
-    return;
+  try {
+    const activated = await activateUser(params.data.id);
+    res.json(formatUser(activated));
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || "Failed to activate user" });
   }
-
-  if (user.status === "active") {
-    res.status(400).json({ error: "User already active" });
-    return;
-  }
-
-  // Activate user
-  const [activated] = await db
-    .update(usersTable)
-    .set({ status: "active" })
-    .where(eq(usersTable.id, user.id))
-    .returning();
-
-  // Create wallet
-  const [existingWallet] = await db
-    .select()
-    .from(walletsTable)
-    .where(eq(walletsTable.userId, user.id));
-
-  if (!existingWallet) {
-    await db.insert(walletsTable).values({
-      userId: user.id,
-      totalEarned: "0",
-      totalSpent: "0",
-      availableBalance: "0",
-    });
-  }
-
-  // BFS tree placement
-  let parentNodeId: number | null = null;
-  let placementLeg: "left" | "right" = "left";
-
-  if (user.sponsorId) {
-    const [sponsorNode] = await db
-      .select()
-      .from(networkNodesTable)
-      .where(eq(networkNodesTable.userId, user.sponsorId));
-
-    if (sponsorNode) {
-      const placement = await bfsPlacement(sponsorNode.id);
-      if (placement) {
-        parentNodeId = placement.parentId;
-        placementLeg = placement.leg;
-      }
-    }
-  }
-
-  // Get parent node depth
-  let depth = 0;
-  if (parentNodeId) {
-    const [parentNode] = await db
-      .select()
-      .from(networkNodesTable)
-      .where(eq(networkNodesTable.id, parentNodeId));
-    if (parentNode) depth = (parentNode.depth ?? 0) + 1;
-  }
-
-  // Create tree node
-  const [newNode] = await db
-    .insert(networkNodesTable)
-    .values({
-      userId: user.id,
-      parentId: parentNodeId,
-      sponsorId: user.sponsorId,
-      leg: placementLeg,
-      depth,
-    })
-    .returning();
-
-  // Update parent's child pointer
-  if (parentNodeId) {
-    if (placementLeg === "left") {
-      await db
-        .update(networkNodesTable)
-        .set({ leftChildId: newNode.id })
-        .where(eq(networkNodesTable.id, parentNodeId));
-    } else {
-      await db
-        .update(networkNodesTable)
-        .set({ rightChildId: newNode.id })
-        .where(eq(networkNodesTable.id, parentNodeId));
-    }
-  }
-
-  // Propagate BV upward
-  await propagateBv(newNode.id, BV_PER_REGISTRATION);
-
-  // Log inflow
-  await financialLedgerTable && await db.insert(financialLedgerTable).values({
-    type: "inflow",
-    amount: String(REGISTRATION_FEE),
-    description: `Registration fee from ${user.firstName} ${user.lastName}`,
-    userId: user.id,
-  });
-
-  // Award direct referral commission (10%) to sponsor
-  if (user.sponsorId) {
-    await awardDirectReferralCommission(user.id, user.sponsorId, REGISTRATION_FEE);
-    await checkAndAwardBinaryCycles(user.sponsorId);
-  }
-
-  // Activity feed
-  await db.insert(activityFeedTable).values({
-    userId: user.id,
-    type: "registration",
-    message: `Welcome! Your account has been activated.`,
-    amount: null,
-  });
-
-  res.json(formatUser(activated));
 });
 
 export default router;

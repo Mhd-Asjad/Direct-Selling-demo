@@ -29,6 +29,7 @@ import {
   TrendingUp, TrendingDown, Users, BarChart3,
   RefreshCw, Zap, AlertTriangle, CheckCircle, Ban, UserCheck,
   Network, DollarSign, Activity, History, BookOpen, Plus, Pencil, Trash2,
+  Camera, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -60,6 +61,7 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [courseDialog, setCourseDialog] = useState<{ open: boolean; mode: "create" | "edit"; id?: number }>({ open: false, mode: "create" });
+  const [selectedKycUser, setSelectedKycUser] = useState<any>(null);
 
   const { data: financialStats } = useGetFinancialStats({
     query: { queryKey: getGetFinancialStatsQueryKey(), enabled: !!isAdmin },
@@ -344,15 +346,24 @@ export default function AdminPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
-                          u.status === "active" ? "bg-accent/20 text-accent" :
-                          u.status === "pending" ? "bg-yellow-500/20 text-yellow-500" :
-                          "bg-destructive/20 text-destructive"
-                        )}>
-                          {u.status}
-                        </span>
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                            u.status === "active" ? "bg-accent/20 text-accent" :
+                            u.status === "pending" ? "bg-yellow-500/20 text-yellow-500" :
+                            "bg-destructive/20 text-destructive"
+                          )}>
+                            {u.status}
+                          </span>
+                          {u.status === "pending" && (
+                            <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider",
+                              u.isPaid ? "bg-accent/20 text-accent border border-accent/25" : "bg-destructive/20 text-destructive border border-destructive/25"
+                            )}>
+                              {u.isPaid ? "Paid" : "Unpaid"}
+                            </span>
+                          )}
+                        </div>
                         {u.role === "admin" && (
-                          <span className="ml-1 text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded">admin</span>
+                          <span className="ml-1 text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded mt-1 inline-block">admin</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -364,16 +375,27 @@ export default function AdminPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           {u.status === "pending" && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-accent border-accent/30 hover:bg-accent/10 h-7 px-2"
-                              onClick={() => approvePayment.mutate({ id: u.id })}
-                              disabled={approvePayment.isPending}
-                              data-testid={`button-approve-${u.id}`}
-                            >
-                              <UserCheck className="w-3 h-3 mr-1" /> Approve
-                            </Button>
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-primary border-primary/30 hover:bg-primary/10 h-7 px-2"
+                                onClick={() => setSelectedKycUser(u)}
+                                data-testid={`button-view-kyc-${u.id}`}
+                              >
+                                <FileText className="w-3 h-3 mr-1" /> View KYC
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-accent border-accent/30 hover:bg-accent/10 h-7 px-2"
+                                onClick={() => approvePayment.mutate({ id: u.id })}
+                                disabled={approvePayment.isPending}
+                                data-testid={`button-approve-${u.id}`}
+                              >
+                                <UserCheck className="w-3 h-3 mr-1" /> Approve
+                              </Button>
+                            </>
                           )}
                           {u.status === "active" && u.role !== "admin" && (
                             <Button
@@ -754,6 +776,134 @@ export default function AdminPage() {
               </Button>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* KYC details dialog */}
+      <Dialog open={!!selectedKycUser} onOpenChange={(open) => !open && setSelectedKycUser(null)}>
+        <DialogContent className="bg-card border-card-border max-w-2xl overflow-y-auto max-h-[90vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <FileText className="w-5 h-5 text-primary" />
+              KYC Verification Documents
+            </DialogTitle>
+            <DialogDescription>
+              Review the registration details and government-issued ID for verification.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedKycUser && (
+            <div className="space-y-6 mt-4">
+              {/* Personal Details */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-secondary/20 p-4 rounded-xl border border-border/40">
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Distributor Name</p>
+                  <p className="text-sm font-bold text-foreground mt-0.5">{selectedKycUser.firstName} {selectedKycUser.lastName}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Username</p>
+                  <p className="text-sm font-bold text-foreground mt-0.5">@{selectedKycUser.username || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Email Address</p>
+                  <p className="text-sm text-foreground mt-0.5">{selectedKycUser.email}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Mobile Number</p>
+                  <p className="text-sm text-foreground mt-0.5">{selectedKycUser.mobileNumber || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Date of Birth</p>
+                  <p className="text-sm text-foreground mt-0.5">{selectedKycUser.dob ? new Date(selectedKycUser.dob).toLocaleDateString(undefined, { dateStyle: 'medium' }) : "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Gender</p>
+                  <p className="text-sm capitalize text-foreground mt-0.5">{selectedKycUser.gender || "—"}</p>
+                </div>
+                <div className="md:col-span-2">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Residential Address</p>
+                  <p className="text-sm text-foreground mt-0.5">
+                    {selectedKycUser.address ? `${selectedKycUser.address}, ` : ""}
+                    {selectedKycUser.city ? `${selectedKycUser.city}, ` : ""}
+                    {selectedKycUser.state ? `${selectedKycUser.state}, ` : ""}
+                    {selectedKycUser.countryCode || ""}
+                  </p>
+                </div>
+                {selectedKycUser.bankDetails && (
+                  <div className="md:col-span-2">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Bank details</p>
+                    <p className="text-sm text-foreground mt-0.5">{selectedKycUser.bankDetails}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Documents grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Profile Photo */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                    <Camera className="w-3.5 h-3.5 text-primary" /> Profile Photo
+                  </p>
+                  <div className="aspect-square bg-secondary/10 border border-border/60 rounded-xl overflow-hidden flex items-center justify-center relative group">
+                    {selectedKycUser.profilePhoto ? (
+                      <img
+                        src={selectedKycUser.profilePhoto}
+                        alt="Profile proof"
+                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 p-4 text-center">
+                        <Camera className="w-8 h-8 text-muted-foreground/50" />
+                        <span className="text-xs text-muted-foreground">No Profile Photo Uploaded</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Government ID Proof */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-primary" /> Government ID Proof
+                  </p>
+                  <div className="aspect-square bg-secondary/10 border border-border/60 rounded-xl overflow-hidden flex items-center justify-center relative group">
+                    {selectedKycUser.govtIdProof ? (
+                      <img
+                        src={selectedKycUser.govtIdProof}
+                        alt="Government ID proof"
+                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 p-4 text-center">
+                        <FileText className="w-8 h-8 text-muted-foreground/50" />
+                        <span className="text-xs text-muted-foreground">No ID Proof Uploaded</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons in dialog */}
+              <div className="flex gap-3 justify-end pt-4 border-t border-border">
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedKycUser(null)}
+                  className="h-9"
+                >
+                  Close
+                </Button>
+                <Button
+                  onClick={() => {
+                    approvePayment.mutate({ id: selectedKycUser.id });
+                    setSelectedKycUser(null);
+                  }}
+                  disabled={approvePayment.isPending}
+                  className="bg-accent hover:bg-accent/90 h-9"
+                >
+                  <UserCheck className="w-4 h-4 mr-1.5" /> Approve & Activate Distributor
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </Layout>
