@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcrypt";
-import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable, financialLedgerTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable, financialLedgerTable, couponsTable, cryptoTransactionsTable, manualDepositRequestsTable } from "@workspace/db";
+import { eq, and, inArray } from "drizzle-orm";
 import { RegisterUserBody, LoginUserBody, GetCurrentUserResponse, PendingRegistration, StripeCreateCheckoutSessionBody, StripeVerifyCheckoutSessionBody } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 import Stripe from "stripe";
@@ -46,7 +46,7 @@ router.get("/auth/verify-referral", async (req, res): Promise<void> => {
 router.post("/auth/register", async (req, res): Promise<void> => {
   const parsed = RegisterUserBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: parsed.error.errors.map(e => e.message).join(", ") });
     return;
   }
 
@@ -123,7 +123,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 router.post("/auth/login", async (req, res): Promise<void> => {
   const parsed = LoginUserBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: parsed.error.errors.map(e => e.message).join(", ") });
     return;
   }
 
@@ -151,6 +151,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
 
 router.post("/auth/logout", async (req, res): Promise<void> => {
   req.session.destroy(() => {
+    res.clearCookie("connect.sid");
     res.sendStatus(204);
   });
 });
@@ -207,10 +208,65 @@ export function formatUser(user: typeof usersTable.$inferSelect) {
   };
 }
 
+router.post("/auth/create-course-checkout-session", async (req, res): Promise<void> => {
+  const { userId } = req.body;
+  if (typeof userId !== "number") {
+    res.status(400).json({ error: "Invalid userId" });
+    return;
+  }
+
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.id, userId));
+
+  if (!user) {
+    res.status(400).json({ error: "User not found" });
+    return;
+  }
+
+  try {
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "sk_test_51MockKeyDontUseInProdChangeThis";
+    const stripe = new Stripe(stripeSecretKey);
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "inr", // ₹1,00,000
+            product_data: {
+              name: "₹1,00,000 Course Package",
+              description: "Provides 2x ₹50,000 activation coupons",
+            },
+            unit_amount: 10000000, // 100,000.00 INR
+          },
+          quantity: 1,
+        },
+      ],
+      mode: "payment",
+      metadata: {
+        userId: String(userId),
+        type: "course_package"
+      },
+      success_url: `${req.headers.origin || "http://localhost:5173"}/dashboard?course_payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${req.headers.origin || "http://localhost:5173"}/dashboard?course_payment=cancelled`,
+    });
+
+    res.json({
+      sessionId: session.id,
+      url: session.url!,
+    });
+  } catch (error: any) {
+    logger.error("Failed to create Stripe session for course:", error);
+    res.status(400).json({ error: error.message || "Failed to create payment session" });
+  }
+});
+
 router.post("/auth/create-checkout-session", async (req, res): Promise<void> => {
   const parsed = StripeCreateCheckoutSessionBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: parsed.error.errors.map(e => e.message).join(", ") });
     return;
   }
 
@@ -271,7 +327,7 @@ router.post("/auth/create-checkout-session", async (req, res): Promise<void> => 
 router.post("/auth/verify-checkout-session", async (req, res): Promise<void> => {
   const parsed = StripeVerifyCheckoutSessionBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: parsed.error.errors.map(e => e.message).join(", ") });
     return;
   }
 
@@ -364,11 +420,40 @@ router.post("/stripe/webhook", async (req, res): Promise<void> => {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const userIdStr = session.metadata?.userId;
+    const sessionType = session.metadata?.type;
+    
     if (userIdStr) {
       const userId = parseInt(userIdStr);
       try {
-        // Record payment in DB
-        const [updatedUser] = await db
+        // Strict duplicate transaction prevention: record session.id in cryptoTransactionsTable
+        try {
+          await db.insert(cryptoTransactionsTable).values({
+            userId,
+            txHash: session.id, // Use Stripe session ID as the unique txHash
+            network: "stripe",
+            toAddress: "system",
+            amount: session.amount_total ? (session.amount_total / 100).toString() : "0",
+            currency: session.currency || "USD",
+            status: "confirmed",
+            webhookSource: "stripe",
+            confirmedAt: new Date()
+          });
+        } catch (dbErr: any) {
+          if (dbErr.code === "23505" || dbErr.message?.includes("unique constraint")) {
+            logger.info(`Webhook skipped: Stripe session ${session.id} already processed.`);
+            res.json({ received: true, skipped: "duplicate" });
+            return;
+          }
+          throw dbErr;
+        }
+
+        if (sessionType === "course_package") {
+          // Direct activation for Stripe course purchase (no coupons needed)
+          await activateUser(userId, 3000);
+          logger.info(`Successfully activated user ${userId} directly via Stripe Webhook`);
+        } else {
+          // Original logic for $30 fee
+          const [updatedUser] = await db
           .update(usersTable)
           .set({ isPaid: true })
           .where(eq(usersTable.id, userId))
@@ -396,13 +481,103 @@ router.post("/stripe/webhook", async (req, res): Promise<void> => {
           }
           logger.info(`Successfully recorded Stripe payment for user ${userId} via Webhook (Pending KYC)`);
         }
+        } // Close else block
       } catch (err: any) {
-        logger.error(`Failed to record Stripe payment for user ${userId} in webhook: ${err.message}`);
+        logger.error(`Failed to record Stripe payment/coupons for user ${userId} in webhook: ${err.message}`);
       }
     }
   }
 
   res.json({ received: true });
+});
+
+router.post("/auth/redeem-activation-coupons", async (req, res): Promise<void> => {
+  const { userId, coupon1, coupon2 } = req.body;
+  if (typeof userId !== "number" || typeof coupon1 !== "string" || typeof coupon2 !== "string") {
+    res.status(400).json({ error: "Invalid request payload" });
+    return;
+  }
+
+  if (coupon1 === coupon2) {
+    res.status(400).json({ error: "Coupons must be different" });
+    return;
+  }
+
+  // Fetch both coupons
+  const coupons = await db
+    .select()
+    .from(couponsTable)
+    .where(
+      and(
+        eq(couponsTable.userId, userId),
+        eq(couponsTable.status, "active"),
+        eq(couponsTable.couponType, "activation"),
+        inArray(couponsTable.code, [coupon1, coupon2])
+      )
+    );
+
+  if (coupons.length !== 2) {
+    res.status(400).json({ error: "Invalid, inactive, or mismatched coupons. Both must be active activation coupons owned by you." });
+    return;
+  }
+
+  // Ensure both are 50000
+  if (parseFloat(coupons[0].amount) !== 50000 || parseFloat(coupons[1].amount) !== 50000) {
+    res.status(400).json({ error: "Both coupons must be valued at 50000 each." });
+    return;
+  }
+
+  // ── STRICT COURSE PURCHASE VERIFICATION GUARD ─────────────────────────────
+  // Before activating the account, verify that a real course purchase happened:
+  //   Option A: An APPROVED manual USDT deposit exists for this user
+  //   Option B: A confirmed Stripe course_package session exists for this user
+  // If neither exists, block activation.
+  const [approvedManualDeposit] = await db
+    .select()
+    .from(manualDepositRequestsTable)
+    .where(
+      and(
+        eq(manualDepositRequestsTable.userId, userId),
+        eq(manualDepositRequestsTable.status, "APPROVED")
+      )
+    );
+
+  const [stripeCoursePurchase] = await db
+    .select()
+    .from(cryptoTransactionsTable)
+    .where(
+      and(
+        eq(cryptoTransactionsTable.userId, userId),
+        eq(cryptoTransactionsTable.network, "stripe"),
+        eq(cryptoTransactionsTable.status, "confirmed")
+      )
+    );
+
+  if (!approvedManualDeposit && !stripeCoursePurchase) {
+    res.status(402).json({
+      error: "Course purchase not verified. Please complete the ₹1,00,000 course package payment first (via Stripe or Manual USDT) before redeeming activation coupons."
+    });
+    return;
+  }
+
+  try {
+    // Redeem both coupons
+    await db
+      .update(couponsTable)
+      .set({ status: "redeemed", redeemedBy: userId, redeemedAt: new Date() })
+      .where(inArray(couponsTable.id, coupons.map(c => c.id)));
+
+    // Activate the user with 3000 BV
+    const activatedUser = await activateUser(userId, 3000);
+
+    res.json({
+      success: true,
+      status: activatedUser.status,
+    });
+  } catch (error: any) {
+    logger.error("Failed to redeem activation coupons:", error);
+    res.status(400).json({ error: error.message || "Failed to redeem coupons and activate account" });
+  }
 });
 
 export default router;

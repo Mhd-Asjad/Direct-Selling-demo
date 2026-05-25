@@ -8,6 +8,7 @@ import walletRouter from "./wallet";
 import adminRouter from "./admin";
 import coursesRouter from "./courses";
 import dashboardRouter from "./dashboard";
+import depositsRouter from "./deposits";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,7 @@ router.use(walletRouter);
 router.use(adminRouter);
 router.use(coursesRouter);
 router.use(dashboardRouter);
+router.use(depositsRouter);
 
 export default router;
+

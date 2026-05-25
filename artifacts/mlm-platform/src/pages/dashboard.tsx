@@ -8,12 +8,12 @@ import {
 } from "@workspace/api-client-react";
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   TrendingUp, Users, Wallet, DollarSign,
   Activity, ArrowUpRight, Clock, CheckCircle,
-  Zap, Network, Award, AlertCircle, CreditCard
+  Zap, Network, Award, AlertCircle, CreditCard, Copy, Check, SendHorizonal, Upload
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -97,6 +97,92 @@ export default function DashboardPage() {
   const createCheckoutSession = useStripeCreateCheckoutSession();
   const verifyCheckoutSession = useStripeVerifyCheckoutSession();
 
+  const [coupon1, setCoupon1] = useState("");
+  const [coupon2, setCoupon2] = useState("");
+  const [paymentTab, setPaymentTab] = useState<"stripe" | "manual">("manual");
+  const [copiedAddress, setCopiedAddress] = useState(false);
+  const [depositForm, setDepositForm] = useState({ amountInUSDT: "", blockchainNetwork: "TRC20", senderWalletAddress: "", screenshotUrl: "" });
+  const [myDeposits, setMyDeposits] = useState<any[]>([]);
+  const [platformUsdtAddress, setPlatformUsdtAddress] = useState("Loading address...");
+
+  const fetchPlatformDetails = async () => {
+    try {
+      const res = await fetch("/api/deposits/platform-address");
+      if (res.ok) {
+        const data = await res.json();
+        setPlatformUsdtAddress(data.address);
+      }
+    } catch {}
+  };
+
+  const fetchMyDeposits = async () => {
+    try {
+      const res = await fetch("/api/deposits/my-requests");
+      if (res.ok) setMyDeposits(await res.json());
+    } catch {}
+  };
+
+  const submitManualDeposit = useMutation({
+    mutationFn: async (data: typeof depositForm) => {
+      const res = await fetch("/api/deposits/manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...data, amountInUSDT: parseFloat(data.amountInUSDT) }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to submit deposit");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Deposit Submitted!", description: "Admin will review your USDT payment and issue activation coupons upon approval." });
+      setDepositForm({ amountInUSDT: "", blockchainNetwork: "TRC20", senderWalletAddress: "", screenshotUrl: "" });
+      fetchMyDeposits();
+    },
+    onError: (err: any) => {
+      toast({ variant: "destructive", title: "Submission Failed", description: err.message });
+    },
+  });
+
+  const createCourseCheckoutSession = useMutation({
+    mutationFn: async (userId: number) => {
+      const res = await fetch("/api/auth/create-course-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to create checkout session");
+      }
+      return res.json();
+    },
+  });
+
+  const redeemCoupons = useMutation({
+    mutationFn: async (data: { userId: number, coupon1: string, coupon2: string }) => {
+      const res = await fetch("/api/auth/redeem-activation-coupons", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to redeem coupons");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() });
+      toast({ title: "Account Activated!", description: "You are now eligible for commissions." });
+    },
+    onError: (err: any) => {
+      toast({ variant: "destructive", title: "Activation Failed", description: err.message });
+    }
+  });
+
   const { data: summary, isLoading: summaryLoading } = useGetDashboardSummary({
     query: { queryKey: getGetDashboardSummaryQueryKey(), enabled: !!user && user.status !== "pending" },
   });
@@ -110,6 +196,14 @@ export default function DashboardPage() {
     { query: { queryKey: getGetCommissionStatsQueryKey({}), enabled: !!user && user.status !== "pending" } },
   );
 
+  // Load user's deposit requests when pending
+  useEffect(() => {
+    if (user?.status === "pending") {
+      fetchMyDeposits();
+      fetchPlatformDetails();
+    }
+  }, [user?.status]);
+
   // Check and run payment verification if redirected back from Stripe
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -117,6 +211,10 @@ export default function DashboardPage() {
     const sessionId = params.get("session_id");
 
     if (payment === "success" && sessionId) {
+      // Remove checkout parameters from URL immediately to prevent infinite loops
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+
       setVerifyingPayment(true);
       verifyCheckoutSession.mutate(
         {
@@ -124,10 +222,6 @@ export default function DashboardPage() {
         },
         {
           onSuccess: () => {
-            // Remove checkout parameters from URL query string
-            const newUrl = window.location.pathname;
-            window.history.replaceState({}, document.title, newUrl);
-
             // Invalidate queries to refresh current user status and dashboard counters
             queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() });
             queryClient.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
@@ -150,7 +244,7 @@ export default function DashboardPage() {
         }
       );
     } else if (payment === "cancelled") {
-      // Clean up URL
+      // Clean up URL immediately
       const newUrl = window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
 
@@ -160,7 +254,28 @@ export default function DashboardPage() {
         description: "Your registration checkout session was cancelled. You can complete it anytime.",
       });
     }
-  }, [queryClient, verifyCheckoutSession, toast]);
+
+    // Handle course package success URL
+    const coursePayment = params.get("course_payment");
+    if (coursePayment === "success") {
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+      toast({
+        title: "Course Purchased!",
+        description: "Your ₹1,00,000 course package was successful. You have received 2 activation coupons in your wallet.",
+      });
+      // Optionally invalidate queries if we had a query fetching coupons here
+    } else if (coursePayment === "cancelled") {
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+      toast({
+        variant: "destructive",
+        title: "Purchase Cancelled",
+        description: "Course package purchase was cancelled.",
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryClient]);
 
   useEffect(() => {
     if (!authLoading && !user) setLocation("/login");
@@ -217,55 +332,203 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Pending Payment Alert Banner */}
-        {user?.status === "pending" && !user?.isPaid && (
-          <div className="bg-card border border-yellow-500/25 rounded-xl p-5 relative overflow-hidden bg-[radial-gradient(ellipse_at_top,_hsl(47_95%_30%_/_0.05)_0%,_transparent_70%)] animate-[pulse_3s_infinite]">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-yellow-500 font-semibold text-sm">
-                  <AlertCircle className="w-4 h-4" />
-                  Distributor Registration Fee Pending
-                </div>
-                <p className="text-xs text-muted-foreground max-w-2xl mt-1">
-                  Your registration details have been submitted! To activate your NetPro distributor license, begin accumulating Business Volume (BV), and unlock direct referral and binary spillover matching commissions, please complete the **$30.00** registration fee.
-                </p>
-              </div>
-              <button
-                disabled={createCheckoutSession.isPending}
-                onClick={() => {
-                  createCheckoutSession.mutate(
-                    { data: { userId: user.id } },
-                    {
-                      onSuccess: (sessionData) => {
-                        window.location.href = sessionData.url;
-                      },
-                      onError: (err: any) => {
-                        toast({
-                          variant: "destructive",
-                          title: "Checkout Error",
-                          description: err.message || "Failed to create Stripe payment session.",
-                        });
-                      },
-                    }
-                  );
-                }}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-black text-xs font-bold transition-all shadow-lg shadow-yellow-500/10 hover:shadow-yellow-500/20 whitespace-nowrap self-start md:self-auto cursor-pointer"
-              >
-                {createCheckoutSession.isPending ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                    Connecting...
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="w-3.5 h-3.5" />
-                    Complete Payment ($30)
-                  </>
-                )}
-              </button>
+        {/* Pending Activation Banner — full tabbed payment flow */}
+        {user?.status === "pending" && (
+          <div className="bg-card border border-yellow-500/25 rounded-xl p-5 relative overflow-hidden space-y-5">
+            {/* Header */}
+            <div className="flex items-center gap-2 text-yellow-500 font-semibold text-sm">
+              <AlertCircle className="w-4 h-4" />
+              Account Activation Required — Complete Course Purchase
             </div>
+
+            {/* Payment Method Tabs */}
+            <div className="flex gap-1 bg-secondary rounded-lg p-1 w-fit">
+              {(["manual", "stripe"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setPaymentTab(tab)}
+                  className={cn(
+                    "px-4 py-1.5 rounded-md text-xs font-medium transition-all",
+                    paymentTab === tab
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {tab === "manual" ? "📤 Manual USDT" : "💳 Stripe (Card)"}
+                </button>
+              ))}
+            </div>
+
+            {/* ── MANUAL USDT TAB ────────────────────────────────────────────── */}
+            {paymentTab === "manual" && (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Send <strong className="text-foreground">≥ 1,200 USDT</strong> (≈ ₹1,00,000) to the platform wallet address below, then fill in your transaction details. An admin will review and issue your 2 activation coupons.
+                </p>
+
+                {/* Platform receiving address */}
+                <div className="p-3 rounded-lg bg-secondary border border-border space-y-1">
+                  <p className="text-xs text-muted-foreground font-medium">Platform USDT Receiving Address (TRC20 / ERC20 / BEP20)</p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs text-foreground font-mono break-all flex-1">{platformUsdtAddress}</code>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard?.writeText(platformUsdtAddress);
+                        setCopiedAddress(true);
+                        setTimeout(() => setCopiedAddress(false), 2000);
+                      }}
+                      className="p-1.5 rounded-md hover:bg-card transition-colors shrink-0"
+                    >
+                      {copiedAddress ? <Check className="w-4 h-4 text-accent" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Submission form */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">Amount Sent (USDT)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="1200.00"
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={depositForm.amountInUSDT}
+                      onChange={e => setDepositForm(f => ({ ...f, amountInUSDT: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">Blockchain Network</label>
+                    <select
+                      className="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={depositForm.blockchainNetwork}
+                      onChange={e => setDepositForm(f => ({ ...f, blockchainNetwork: e.target.value }))}
+                    >
+                      <option value="TRC20">TRC20 (Tron)</option>
+                      <option value="ERC20">ERC20 (Ethereum)</option>
+                      <option value="BEP20">BEP20 (BSC)</option>
+                      <option value="SOL">Solana</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-xs text-muted-foreground font-medium">Your Sending Wallet Address</label>
+                    <input
+                      type="text"
+                      placeholder="TXxx... or 0x..."
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={depositForm.senderWalletAddress}
+                      onChange={e => setDepositForm(f => ({ ...f, senderWalletAddress: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-xs text-muted-foreground font-medium">Screenshot URL (optional proof)</label>
+                    <input
+                      type="url"
+                      placeholder="https://..."
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={depositForm.screenshotUrl}
+                      onChange={e => setDepositForm(f => ({ ...f, screenshotUrl: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  disabled={submitManualDeposit.isPending || !depositForm.amountInUSDT || !depositForm.senderWalletAddress}
+                  onClick={() => submitManualDeposit.mutate(depositForm)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-yellow-950 text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-yellow-500/20 disabled:opacity-50"
+                >
+                  <SendHorizonal className="w-4 h-4" />
+                  {submitManualDeposit.isPending ? "Submitting..." : "Submit Deposit for Review"}
+                </button>
+
+                {/* My deposit requests */}
+                {myDeposits.length > 0 && (
+                  <div className="space-y-2 border-t border-border/50 pt-4">
+                    <p className="text-xs font-medium text-muted-foreground">My Deposit Requests</p>
+                    <div className="space-y-2">
+                      {myDeposits.map((d) => (
+                        <div key={d.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-secondary text-xs">
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <p className="text-muted-foreground">{d.amountInUSDT} USDT · {d.blockchainNetwork}</p>
+                            <p className="text-xs text-muted-foreground font-mono truncate">{d.senderWalletAddress}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <span className={cn("px-2 py-0.5 rounded-full font-medium",
+                              d.status === "PENDING" ? "bg-yellow-500/10 text-yellow-500" :
+                              d.status === "APPROVED" ? "bg-accent/10 text-accent" : "bg-destructive/10 text-destructive"
+                            )}>{d.status}</span>
+                            {d.coupon1Code && (
+                              <span className="text-[10px] text-accent">Coupons issued ✓</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── STRIPE TAB ─────────────────────────────────────────────────── */}
+            {paymentTab === "stripe" && (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Pay ₹1,00,000 securely by card via Stripe. Upon payment success, the system will directly activate your account and place you in the network tree automatically (no coupons required).
+                </p>
+                <button
+                  disabled={createCourseCheckoutSession.isPending}
+                  onClick={() => {
+                    createCourseCheckoutSession.mutate(user.id, {
+                      onSuccess: (sessionData) => { window.location.href = sessionData.url; },
+                      onError: (err: any) => {
+                        toast({ variant: "destructive", title: "Checkout Error", description: err.message || "Failed to create Stripe payment session." });
+                      },
+                    });
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-yellow-950 text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-yellow-500/20 disabled:opacity-50"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  {createCourseCheckoutSession.isPending ? "Connecting..." : "Pay ₹1,00,000 via Stripe →"}
+                </button>
+              </div>
+            )}
+
+            {/* ── STEP 2: COUPON REDEMPTION (Manual USDT Only) ──────────────── */}
+            {paymentTab === "manual" && (
+              <div className="space-y-2 border-t border-border/50 pt-4">
+                <h3 className="text-foreground font-medium text-sm">Step 2: Redeem Activation Coupons (For Manual USDT)</h3>
+                <p className="text-xs text-muted-foreground">
+                  If you paid via Manual USDT, enter the two ₹50,000 coupon codes issued by the admin to activate your account (3000 BV, binary tree placement, commission eligibility). Stripe users do not need to do this.
+                </p>
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Coupon Code 1"
+                    className="flex h-9 w-full sm:w-48 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={coupon1}
+                    onChange={e => setCoupon1(e.target.value)}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Coupon Code 2"
+                    className="flex h-9 w-full sm:w-48 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={coupon2}
+                    onChange={e => setCoupon2(e.target.value)}
+                  />
+                  <button
+                    disabled={redeemCoupons.isPending || !coupon1 || !coupon2}
+                    onClick={() => redeemCoupons.mutate({ userId: user.id, coupon1, coupon2 })}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {redeemCoupons.isPending ? "Activating..." : "Activate Account"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
+
 
         {/* Payment Received, Pending KYC Approval Banner */}
         {user?.status === "pending" && user?.isPaid && (

@@ -10,7 +10,7 @@ const BV_PER_REGISTRATION = 30;
  * Activates a pending user, places them into the binary MLM tree,
  * processes BV propagation, distributes sponsor commissions, and updates E-Wallet/financial feeds.
  */
-export async function activateUser(userId: number) {
+export async function activateUser(userId: number, bvAmount: number = BV_PER_REGISTRATION) {
   const [user] = await db
     .select()
     .from(usersTable)
@@ -106,7 +106,7 @@ export async function activateUser(userId: number) {
   }
 
   // 7. Propagate BV upwards through sponsor path
-  await propagateBv(newNode.id, BV_PER_REGISTRATION);
+  await propagateBv(newNode.id, bvAmount);
 
   // 8. Log financial ledger inflow if it hasn't been logged yet (e.g. if paid via bank/cash manually rather than Stripe)
   if (!user.isPaid) {

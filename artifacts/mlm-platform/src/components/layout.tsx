@@ -32,14 +32,16 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const { user, isAdmin } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const queryClient = useQueryClient();
   const logout = useLogoutUser({
     mutation: {
       onSuccess: () => {
+        queryClient.setQueryData(getGetCurrentUserQueryKey(), null);
         queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() });
+        setLocation("/login");
       },
     },
   });
