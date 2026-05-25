@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { RegistrationInputPackageType } from './registrationInputPackageType';
+import type { RegistrationInputPlacementSide } from './registrationInputPlacementSide';
 
 export interface RegistrationInput {
   email: string;
@@ -17,6 +18,17 @@ export interface RegistrationInput {
   mobileNumber: string;
   address: string;
   countryCode: string;
-  packageType: RegistrationInputPackageType;
-  agreedToTerms?: boolean;
+  packageType?: RegistrationInputPackageType;
+  username: string;
+  state: string;
+  city: string;
+  dob: string;
+  gender: string;
+  profilePhoto: string;
+  govtIdProof: string;
+  sponsorReferralId?: string;
+  placementSide?: RegistrationInputPlacementSide;
+  usdtAddress?: string;
+  bankDetails?: string;
+  agreedToTerms: boolean;
 }

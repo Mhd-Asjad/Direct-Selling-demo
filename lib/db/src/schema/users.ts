@@ -12,11 +12,23 @@ export const usersTable = pgTable("users", {
   address: text("address"),
   countryCode: text("country_code").default("US"),
   status: text("status").notNull().default("pending"), // pending | active | suspended
+  isPaid: boolean("is_paid").notNull().default(false),
   role: text("role").notNull().default("distributor"), // distributor | admin
   referralCode: text("referral_code").notNull().unique(),
   referrerId: text("referrer_id"), // UUID referral code of sponsor
   sponsorId: integer("sponsor_id"), // FK to users(id) - direct recruiter
   packageType: text("package_type"), // starter | pro | elite
+  username: text("username"),
+  state: text("state"),
+  city: text("city"),
+  dob: text("dob"),
+  gender: text("gender"),
+  profilePhoto: text("profile_photo"),
+  govtIdProof: text("govt_id_proof"),
+  sponsorReferralId: text("sponsor_referral_id"),
+  placementSide: text("placement_side"),
+  usdtAddress: text("usdt_address"),
+  bankDetails: text("bank_details"),
   leftBv: numeric("left_bv", { precision: 12, scale: 2 }).notNull().default("0"),
   rightBv: numeric("right_bv", { precision: 12, scale: 2 }).notNull().default("0"),
   residualLeftBv: numeric("residual_left_bv", { precision: 12, scale: 2 }).notNull().default("0"),

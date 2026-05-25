@@ -4,13 +4,16 @@ import {
   useGetDashboardSummary, getGetDashboardSummaryQueryKey,
   useGetRecentActivity, getGetRecentActivityQueryKey,
   useGetCommissionStats, getGetCommissionStatsQueryKey,
+  useStripeCreateCheckoutSession, useStripeVerifyCheckoutSession, getGetCurrentUserQueryKey
 } from "@workspace/api-client-react";
 import { useLocation } from "wouter";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 import {
   TrendingUp, Users, Wallet, DollarSign,
   Activity, ArrowUpRight, Clock, CheckCircle,
-  Zap, Network, Award,
+  Zap, Network, Award, AlertCircle, CreditCard
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -86,25 +89,102 @@ const activityColors: Record<string, string> = {
 export default function DashboardPage() {
   const [, setLocation] = useLocation();
   const { user, isLoading: authLoading } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
+
+  const createCheckoutSession = useStripeCreateCheckoutSession();
+  const verifyCheckoutSession = useStripeVerifyCheckoutSession();
 
   const { data: summary, isLoading: summaryLoading } = useGetDashboardSummary({
-    query: { queryKey: getGetDashboardSummaryQueryKey(), enabled: !!user },
+    query: { queryKey: getGetDashboardSummaryQueryKey(), enabled: !!user && user.status !== "pending" },
   });
 
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity({
-    query: { queryKey: getGetRecentActivityQueryKey(), enabled: !!user },
+    query: { queryKey: getGetRecentActivityQueryKey(), enabled: !!user && user.status !== "pending" },
   });
 
   const { data: commStats } = useGetCommissionStats(
     {},
-    { query: { queryKey: getGetCommissionStatsQueryKey({}), enabled: !!user } },
+    { query: { queryKey: getGetCommissionStatsQueryKey({}), enabled: !!user && user.status !== "pending" } },
   );
+
+  // Check and run payment verification if redirected back from Stripe
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    const sessionId = params.get("session_id");
+
+    if (payment === "success" && sessionId) {
+      setVerifyingPayment(true);
+      verifyCheckoutSession.mutate(
+        {
+          data: { sessionId },
+        },
+        {
+          onSuccess: () => {
+            // Remove checkout parameters from URL query string
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+
+            // Invalidate queries to refresh current user status and dashboard counters
+            queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() });
+            queryClient.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
+            queryClient.invalidateQueries({ queryKey: getGetRecentActivityQueryKey() });
+
+            toast({
+              title: "Payment Verified!",
+              description: "Your $30 distributor registration fee is approved. Welcome to NetPro!",
+            });
+            setVerifyingPayment(false);
+          },
+          onError: (err: any) => {
+            toast({
+              variant: "destructive",
+              title: "Verification Failed",
+              description: err.message || "Failed to verify Stripe checkout session.",
+            });
+            setVerifyingPayment(false);
+          },
+        }
+      );
+    } else if (payment === "cancelled") {
+      // Clean up URL
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+
+      toast({
+        variant: "destructive",
+        title: "Payment Cancelled",
+        description: "Your registration checkout session was cancelled. You can complete it anytime.",
+      });
+    }
+  }, [queryClient, verifyCheckoutSession, toast]);
 
   useEffect(() => {
     if (!authLoading && !user) setLocation("/login");
   }, [authLoading, user, setLocation]);
 
-  if (authLoading || summaryLoading) {
+  if (verifyingPayment) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4 relative">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_hsl(199_89%_48%_/_0.08)_0%,_transparent_70%)] pointer-events-none" />
+        <div className="w-full max-w-sm text-center space-y-4 relative z-10 bg-card border border-card-border rounded-xl p-8 shadow-xl">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent/20 border border-accent/30 animate-pulse">
+            <CheckCircle className="w-8 h-8 text-accent" />
+          </div>
+          <h2 className="text-xl font-bold text-foreground">Verifying Stripe Payment</h2>
+          <p className="text-sm text-muted-foreground">
+            We are confirming your registration fee with Stripe. Your NetPro distributor account will activate momentarily...
+          </p>
+          <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mt-4" />
+        </div>
+      </div>
+    );
+  }
+
+  if (authLoading || (summaryLoading && user?.status !== "pending")) {
     return (
       <Layout>
         <div className="flex items-center justify-center h-full">
@@ -136,6 +216,77 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+
+        {/* Pending Payment Alert Banner */}
+        {user?.status === "pending" && !user?.isPaid && (
+          <div className="bg-card border border-yellow-500/25 rounded-xl p-5 relative overflow-hidden bg-[radial-gradient(ellipse_at_top,_hsl(47_95%_30%_/_0.05)_0%,_transparent_70%)] animate-[pulse_3s_infinite]">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-yellow-500 font-semibold text-sm">
+                  <AlertCircle className="w-4 h-4" />
+                  Distributor Registration Fee Pending
+                </div>
+                <p className="text-xs text-muted-foreground max-w-2xl mt-1">
+                  Your registration details have been submitted! To activate your NetPro distributor license, begin accumulating Business Volume (BV), and unlock direct referral and binary spillover matching commissions, please complete the **$30.00** registration fee.
+                </p>
+              </div>
+              <button
+                disabled={createCheckoutSession.isPending}
+                onClick={() => {
+                  createCheckoutSession.mutate(
+                    { data: { userId: user.id } },
+                    {
+                      onSuccess: (sessionData) => {
+                        window.location.href = sessionData.url;
+                      },
+                      onError: (err: any) => {
+                        toast({
+                          variant: "destructive",
+                          title: "Checkout Error",
+                          description: err.message || "Failed to create Stripe payment session.",
+                        });
+                      },
+                    }
+                  );
+                }}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-black text-xs font-bold transition-all shadow-lg shadow-yellow-500/10 hover:shadow-yellow-500/20 whitespace-nowrap self-start md:self-auto cursor-pointer"
+              >
+                {createCheckoutSession.isPending ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-3.5 h-3.5" />
+                    Complete Payment ($30)
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Received, Pending KYC Approval Banner */}
+        {user?.status === "pending" && user?.isPaid && (
+          <div className="bg-card border border-accent/25 rounded-xl p-5 relative overflow-hidden bg-[radial-gradient(ellipse_at_top,_hsl(168_84%_30%_/_0.05)_0%,_transparent_70%)]">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-accent font-semibold text-sm">
+                  <CheckCircle className="w-4 h-4 text-accent" />
+                  Registration Payment Received
+                </div>
+                <p className="text-xs text-muted-foreground max-w-2xl mt-1">
+                  Thank you! Your **$30.00** registration fee has been successfully processed via Stripe. Your account is currently awaiting administrator review of your uploaded KYC documents. We will activate your dashboard features as soon as the review is complete.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/20 text-accent text-xs font-semibold whitespace-nowrap self-start md:self-auto">
+                <Clock className="w-3.5 h-3.5 text-accent animate-spin" style={{ animationDuration: "3s" }} />
+                Awaiting KYC Review
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

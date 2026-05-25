@@ -24,6 +24,14 @@ export const RegistrationInputPackageType = {
   elite: 'elite',
 } as const;
 
+export type RegistrationInputPlacementSide = typeof RegistrationInputPlacementSide[keyof typeof RegistrationInputPlacementSide];
+
+
+export const RegistrationInputPlacementSide = {
+  left: 'left',
+  right: 'right',
+} as const;
+
 export interface RegistrationInput {
   email: string;
   password: string;
@@ -34,13 +42,42 @@ export interface RegistrationInput {
   mobileNumber: string;
   address: string;
   countryCode: string;
-  packageType: RegistrationInputPackageType;
-  agreedToTerms?: boolean;
+  packageType?: RegistrationInputPackageType;
+  username: string;
+  state: string;
+  city: string;
+  dob: string;
+  gender: string;
+  profilePhoto: string;
+  govtIdProof: string;
+  sponsorReferralId?: string;
+  placementSide?: RegistrationInputPlacementSide;
+  usdtAddress?: string;
+  bankDetails?: string;
+  agreedToTerms: boolean;
 }
 
 export interface PendingRegistration {
   id: number;
   email: string;
+  status: string;
+}
+
+export interface CreateCheckoutSessionInput {
+  userId: number;
+}
+
+export interface CreateCheckoutSessionResponse {
+  sessionId: string;
+  url: string;
+}
+
+export interface VerifyCheckoutSessionInput {
+  sessionId: string;
+}
+
+export interface VerifyCheckoutSessionResponse {
+  success: boolean;
   status: string;
 }
 
@@ -78,12 +115,35 @@ export interface User {
   /** @nullable */
   countryCode?: string | null;
   status: UserStatus;
+  isPaid: boolean;
   role: UserRole;
   referralCode: string;
   /** @nullable */
   referrerId?: string | null;
   /** @nullable */
   packageType?: string | null;
+  /** @nullable */
+  username?: string | null;
+  /** @nullable */
+  state?: string | null;
+  /** @nullable */
+  city?: string | null;
+  /** @nullable */
+  dob?: string | null;
+  /** @nullable */
+  gender?: string | null;
+  /** @nullable */
+  profilePhoto?: string | null;
+  /** @nullable */
+  govtIdProof?: string | null;
+  /** @nullable */
+  sponsorReferralId?: string | null;
+  /** @nullable */
+  placementSide?: string | null;
+  /** @nullable */
+  usdtAddress?: string | null;
+  /** @nullable */
+  bankDetails?: string | null;
   leftBv?: number;
   rightBv?: number;
   createdAt: string;
