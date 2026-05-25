@@ -187,7 +187,7 @@ export default function WalletPage() {
                 variant="outline"
                 onClick={() => setShowSetPin(true)}
                 data-testid="button-set-pin"
-                className="ml-auto"
+                className="ml-auto cursor-pointer"
               >
                 {wallet?.hasPin ? <Unlock className="w-4 h-4 mr-1" /> : <Lock className="w-4 h-4 mr-1" />}
                 {wallet?.hasPin ? "Change PIN" : "Set PIN"}

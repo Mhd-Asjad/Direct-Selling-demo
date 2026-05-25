@@ -34,7 +34,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
-const TABS = ["Overview", "Users", "Network", "BV Stats", "Courses", "Wash Reset"] as const;
+const TABS = ["Overview", "USDT Deposits", "Payments", "Users", "Network", "BV Stats", "Courses", "Wash Reset"] as const;
 type Tab = typeof TABS[number];
 
 const washSchema = z.object({
@@ -62,6 +62,12 @@ export default function AdminPage() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [courseDialog, setCourseDialog] = useState<{ open: boolean; mode: "create" | "edit"; id?: number }>({ open: false, mode: "create" });
   const [selectedKycUser, setSelectedKycUser] = useState<any>(null);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [actionPending, setActionPending] = useState<number | null>(null);
+  const [usdtDeposits, setUsdtDeposits] = useState<any[]>([]);
+  const [usdtDepositsLoading, setUsdtDepositsLoading] = useState(false);
+  const [depositActionPending, setDepositActionPending] = useState<number | null>(null);
 
   const { data: financialStats } = useGetFinancialStats({
     query: { queryKey: getGetFinancialStatsQueryKey(), enabled: !!isAdmin },
@@ -88,6 +94,82 @@ export default function AdminPage() {
   const { data: networkStats } = useGetNetworkStats({
     query: { queryKey: getGetNetworkStatsQueryKey(), enabled: !!isAdmin },
   });
+
+  const fetchSubmissions = async () => {
+    if (!isAdmin) return;
+    setSubmissionsLoading(true);
+    try {
+      const res = await fetch("/api/onboarding/admin/submissions");
+      if (res.ok) setSubmissions(await res.json());
+    } finally { setSubmissionsLoading(false); }
+  };
+
+  const handleSubmissionAction = async (id: number, action: "approve" | "reject", reason?: string) => {
+    setActionPending(id);
+    try {
+      const res = await fetch(`/api/onboarding/admin/submissions/${id}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(action === "reject" ? { reason } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: action === "approve" ? "Payment approved — coupons issued!" : "Submission rejected." });
+      fetchSubmissions();
+      queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+    } catch (err: any) {
+      toast({ title: "Action failed", description: err.message, variant: "destructive" });
+    } finally { setActionPending(null); }
+  };
+
+  useEffect(() => { if (activeTab === "Payments") fetchSubmissions(); }, [activeTab, isAdmin]);
+
+  const fetchUsdtDeposits = async () => {
+    if (!isAdmin) return;
+    setUsdtDepositsLoading(true);
+    try {
+      const res = await fetch("/api/admin/deposits");
+      if (res.ok) setUsdtDeposits(await res.json());
+    } finally { setUsdtDepositsLoading(false); }
+  };
+
+  const handleDepositApprove = async (id: number) => {
+    setDepositActionPending(id);
+    try {
+      const res = await fetch(`/api/admin/deposits/${id}/approve`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({
+        title: "Deposit Approved!",
+        description: `2 activation coupons issued: ${data.coupon1} & ${data.coupon2}`,
+      });
+      fetchUsdtDeposits();
+      queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+    } catch (err: any) {
+      toast({ title: "Approval failed", description: err.message, variant: "destructive" });
+    } finally { setDepositActionPending(null); }
+  };
+
+  const handleDepositReject = async (id: number) => {
+    const reason = prompt("Rejection reason (optional):");
+    if (reason === null) return; // cancelled
+    setDepositActionPending(id);
+    try {
+      const res = await fetch(`/api/admin/deposits/${id}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: "Deposit rejected." });
+      fetchUsdtDeposits();
+    } catch (err: any) {
+      toast({ title: "Rejection failed", description: err.message, variant: "destructive" });
+    } finally { setDepositActionPending(null); }
+  };
+
+  useEffect(() => { if (activeTab === "USDT Deposits") fetchUsdtDeposits(); }, [activeTab, isAdmin]);
 
   const { data: courses, isLoading: coursesLoading } = useListAdminCourses({
     query: { queryKey: getListAdminCoursesQueryKey(), enabled: !!isAdmin && activeTab === "Courses" },
@@ -226,6 +308,186 @@ export default function AdminPage() {
             </button>
           ))}
         </div>
+
+        {/* USDT DEPOSITS TAB */}
+        {activeTab === "USDT Deposits" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Manual USDT Deposit Requests</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Review, approve, or reject course payment deposits submitted by users</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={fetchUsdtDeposits} disabled={usdtDepositsLoading}>
+                <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", usdtDepositsLoading && "animate-spin")} /> Refresh
+              </Button>
+            </div>
+
+            <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+              {usdtDepositsLoading ? (
+                <div className="p-8 text-center"><div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" /></div>
+              ) : usdtDeposits.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">No USDT deposit requests yet</div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {usdtDeposits.map((d) => (
+                    <div key={d.id} className="p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-foreground text-sm">
+                              {d.user ? `${d.user.firstName} ${d.user.lastName}` : `User #${d.userId}`}
+                            </span>
+                            {d.user?.email && <span className="text-xs text-muted-foreground">({d.user.email})</span>}
+                            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                              d.status === "PENDING" ? "bg-yellow-500/10 text-yellow-500" :
+                              d.status === "APPROVED" ? "bg-accent/10 text-accent" : "bg-destructive/10 text-destructive"
+                            )}>{d.status}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                            <span>Amount: <span className="text-foreground font-semibold">{d.amountInUSDT} USDT</span></span>
+                            <span>Network: <span className="text-foreground">{d.blockchainNetwork}</span></span>
+                            <span className="col-span-2">Sender Wallet: <span className="text-foreground font-mono break-all">{d.senderWalletAddress}</span></span>
+                            {d.screenshotUrl && (
+                              <a href={d.screenshotUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline col-span-2">📎 View Screenshot</a>
+                            )}
+                            <span className="text-muted-foreground/60">Submitted: {new Date(d.createdAt).toLocaleString()}</span>
+                            {d.reviewedAt && <span className="text-muted-foreground/60">Reviewed: {new Date(d.reviewedAt).toLocaleString()}</span>}
+                          </div>
+                          {d.status === "APPROVED" && d.coupon1Code && (
+                            <div className="p-2 rounded bg-accent/5 border border-accent/20 text-xs space-y-0.5">
+                              <p className="text-accent font-medium">✓ Coupons Issued</p>
+                              <p className="font-mono text-foreground">{d.coupon1Code}</p>
+                              <p className="font-mono text-foreground">{d.coupon2Code}</p>
+                            </div>
+                          )}
+                          {d.status === "REJECTED" && d.rejectionReason && (
+                            <p className="text-xs text-destructive bg-destructive/5 px-2 py-1 rounded">Reason: {d.rejectionReason}</p>
+                          )}
+                        </div>
+                        {d.status === "PENDING" && (
+                          <div className="flex flex-col gap-2 shrink-0">
+                            <Button
+                              size="sm"
+                              className="h-8 px-3 text-xs"
+                              onClick={() => handleDepositApprove(d.id)}
+                              disabled={depositActionPending === d.id}
+                            >
+                              <CheckCircle className="w-3 h-3 mr-1" /> Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 px-3 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                              onClick={() => handleDepositReject(d.id)}
+                              disabled={depositActionPending === d.id}
+                            >
+                              <Ban className="w-3 h-3 mr-1" /> Reject
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* PAYMENTS TAB */}
+        {activeTab === "Payments" && (
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Payment Submissions</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Review and approve manual payment submissions from new users</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={fetchSubmissions} disabled={submissionsLoading}>
+                <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", submissionsLoading && "animate-spin")} /> Refresh
+              </Button>
+            </div>
+
+            <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+              {submissionsLoading ? (
+                <div className="p-8 text-center"><div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" /></div>
+              ) : submissions.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">No payment submissions yet</div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {submissions.map((s) => (
+                    <div key={s.id} className="p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-foreground text-sm">User #{s.userId}</span>
+                            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                              s.paymentMethod === "manual_usdt" ? "bg-blue-500/10 text-blue-400" : "bg-green-500/10 text-green-400"
+                            )}>
+                              {s.paymentMethod === "manual_usdt" ? "USDT Transfer" : "Cash in Hand"}
+                            </span>
+                            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                              s.status === "pending" ? "bg-yellow-500/10 text-yellow-500" :
+                              s.status === "approved" ? "bg-accent/10 text-accent" : "bg-destructive/10 text-destructive"
+                            )}>{s.status}</span>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                            {s.paymentMethod === "manual_usdt" ? (
+                              <>
+                                <span>Wallet: <span className="text-foreground font-mono">{s.senderWalletAddress ?? "—"}</span></span>
+                                <span>Network: <span className="text-foreground">{s.blockchainNetwork ?? "—"}</span></span>
+                                <span>Amount: <span className="text-foreground font-semibold">{s.transferredAmount ? `$${parseFloat(s.transferredAmount).toFixed(2)}` : "—"}</span></span>
+                                <span>Date: <span className="text-foreground">{s.paymentDateTime ? new Date(s.paymentDateTime).toLocaleString() : "—"}</span></span>
+                              </>
+                            ) : (
+                              <>
+                                <span>Ref: <span className="text-foreground font-mono">{s.paymentReferenceNumber ?? "—"}</span></span>
+                                <span>Collector: <span className="text-foreground">{s.collectorName ?? "—"} (ID: {s.collectorId ?? "—"})</span></span>
+                                <span>Date: <span className="text-foreground">{s.paymentDate ? new Date(s.paymentDate).toLocaleDateString() : "—"}</span></span>
+                                {s.remarks && <span className="col-span-2">Remarks: <span className="text-foreground">{s.remarks}</span></span>}
+                              </>
+                            )}
+                            {s.paymentScreenshotUrl && (
+                              <a href={s.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline col-span-2">📎 View Screenshot</a>
+                            )}
+                            <span className="text-muted-foreground/60">Submitted: {new Date(s.createdAt).toLocaleString()}</span>
+                          </div>
+                          {s.rejectionReason && (
+                            <p className="mt-2 text-xs text-destructive bg-destructive/5 px-2 py-1 rounded">Rejected: {s.rejectionReason}</p>
+                          )}
+                        </div>
+                        {s.status === "pending" && (
+                          <div className="flex flex-col gap-2 shrink-0">
+                            <Button
+                              size="sm"
+                              className="h-8 px-3 text-xs"
+                              onClick={() => handleSubmissionAction(s.id, "approve")}
+                              disabled={actionPending === s.id}
+                            >
+                              <CheckCircle className="w-3 h-3 mr-1" /> Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 px-3 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                              onClick={() => {
+                                const reason = prompt("Rejection reason:");
+                                if (reason !== null) handleSubmissionAction(s.id, "reject", reason);
+                              }}
+                              disabled={actionPending === s.id}
+                            >
+                              <Ban className="w-3 h-3 mr-1" /> Reject
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* OVERVIEW TAB */}
         {activeTab === "Overview" && (
