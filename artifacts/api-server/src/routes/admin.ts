@@ -1,8 +1,10 @@
 import { Router, type IRouter } from "express";
-import { db, financialLedgerTable, washEventsTable, walletsTable, commissionsTable, networkNodesTable, usersTable, coursesTable } from "@workspace/db";
+import { db, financialLedgerTable, washEventsTable, walletsTable, commissionsTable, networkNodesTable, usersTable, coursesTable, walletTransactionsTable, activityFeedTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { ExecuteWashResetBody, CreateAdminCourseBody, UpdateAdminCourseBody } from "@workspace/api-zod";
 import bcrypt from "bcrypt";
+import { activateUser } from "../lib/activation";
+import { creditWallet } from "../lib/commissions";
 
 const router: IRouter = Router();
 
@@ -249,6 +251,94 @@ router.delete("/admin/courses/:id", async (req, res): Promise<void> => {
     .where(eq(coursesTable.id, id));
 
   res.json({ success: true });
+});
+
+
+// ── POST /admin/transfer-activation — admin directly activates a user ──────────
+router.post("/admin/transfer-activation", async (req, res): Promise<void> => {
+  const sessionUserId = (req.session as any).userId;
+  if (!sessionUserId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const [admin] = await db.select().from(usersTable).where(eq(usersTable.id, sessionUserId));
+  if (!admin || admin.role !== "admin") {
+    res.status(403).json({ error: "Admin access required" });
+    return;
+  }
+
+  const { targetUserId, targetWalletId, amountUSDT, note } = req.body;
+
+  // Resolve user by either numeric ID or string wallet ID
+  let resolvedUserId: number | null = null;
+
+  if (targetWalletId && typeof targetWalletId === "string") {
+    // Look up by walletId on the wallets table
+    const normalizedWalletId = targetWalletId.trim().toUpperCase();
+    const [wallet] = await db
+      .select()
+      .from(walletsTable)
+      .where(eq(walletsTable.walletId, normalizedWalletId));
+    if (!wallet) {
+      res.status(404).json({ error: `No user found with Wallet ID: ${normalizedWalletId}` });
+      return;
+    }
+    resolvedUserId = wallet.userId;
+  } else if (targetUserId && typeof targetUserId === "number") {
+    resolvedUserId = targetUserId;
+  } else {
+    res.status(400).json({ error: "Provide either targetWalletId (string) or targetUserId (number)" });
+    return;
+  }
+
+  const creditAmount = typeof amountUSDT === "number" && amountUSDT > 0 ? amountUSDT : 1200;
+
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, resolvedUserId));
+  if (!targetUser) {
+    res.status(404).json({ error: "Target user not found" });
+    return;
+  }
+
+  if (targetUser.status === "active") {
+    res.status(409).json({ error: "User is already active" });
+    return;
+  }
+
+  try {
+    // 1. Activate user — places in binary tree, propagates BV, awards commissions
+    const activatedUser = await activateUser(resolvedUserId, 3000);
+
+    // 2. Credit their wallet with the activation amount
+    await creditWallet(
+      resolvedUserId,
+      creditAmount,
+      note || `Admin activation transfer from ${admin.firstName} ${admin.lastName}`,
+      `admin_activation:${sessionUserId}:${Date.now()}`
+    );
+
+    // 3. Log financial ledger inflow
+    await db.insert(financialLedgerTable).values({
+      type: "inflow",
+      amount: String(creditAmount),
+      description: `Admin USDT transfer activation — ${activatedUser.firstName} ${activatedUser.lastName} (by admin #${sessionUserId})`,
+      userId: resolvedUserId,
+    });
+
+    // 4. Lookup the wallet ID to include in response
+    const [activatedWallet] = await db.select().from(walletsTable).where(eq(walletsTable.userId, resolvedUserId));
+
+    res.json({
+      success: true,
+      userId: resolvedUserId,
+      walletId: activatedWallet?.walletId ?? null,
+      status: activatedUser.status,
+      creditedAmount: creditAmount,
+      message: `User ${activatedUser.firstName} ${activatedUser.lastName} has been activated and ${creditAmount} USDT credited to their wallet.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to transfer activation" });
+  }
 });
 
 export default router;

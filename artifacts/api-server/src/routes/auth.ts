@@ -81,6 +81,20 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     sponsorId = sponsor.id;
   }
 
+  // Validate wallet ID uniqueness if provided
+  const rawWalletId = (data as any).walletId;
+  const normalizedWalletId = rawWalletId ? rawWalletId.trim().toUpperCase() : null;
+  if (normalizedWalletId) {
+    const [existingWallet] = await db
+      .select()
+      .from(walletsTable)
+      .where(eq(walletsTable.walletId, normalizedWalletId));
+    if (existingWallet) {
+      res.status(400).json({ error: "Wallet ID already taken. Please choose a different one." });
+      return;
+    }
+  }
+
   const passwordHash = await bcrypt.hash(data.password, 10);
   const referralCode = generateReferralCode();
 
@@ -113,10 +127,20 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     })
     .returning();
 
+  // Provision wallet immediately, saving the custom walletId
+  await db.insert(walletsTable).values({
+    userId: newUser.id,
+    walletId: normalizedWalletId ?? null,
+    totalEarned: "0",
+    totalSpent: "0",
+    availableBalance: "0",
+  });
+
   res.status(201).json({
     id: newUser.id,
     email: newUser.email,
     status: newUser.status,
+    walletId: normalizedWalletId,
   });
 });
 
@@ -351,20 +375,11 @@ router.post("/auth/verify-checkout-session", async (req, res): Promise<void> => 
     }
 
     const userId = parseInt(userIdStr);
-    
-    // Update user to record they paid (keep status as pending until KYC approved)
-    const [updatedUser] = await db
-      .update(usersTable)
-      .set({ isPaid: true })
-      .where(eq(usersTable.id, userId))
-      .returning();
 
-    if (!updatedUser) {
-      res.status(404).json({ error: "User not found" });
-      return;
-    }
+    // ✅ Fully activate user — sets status=active, places in tree, propagates BV, awards commissions
+    const activatedUser = await activateUser(userId, 3000);
 
-    // Log the financial ledger inflow if it hasn't been logged yet
+    // Log financial inflow if not already present
     const existingInflows = await db
       .select()
       .from(financialLedgerTable)
@@ -378,15 +393,15 @@ router.post("/auth/verify-checkout-session", async (req, res): Promise<void> => 
     if (existingInflows.length === 0) {
       await db.insert(financialLedgerTable).values({
         type: "inflow",
-        amount: "30.00",
-        description: `Registration fee from ${updatedUser.firstName} ${updatedUser.lastName} via Stripe (Pending KYC)`,
-        userId: updatedUser.id,
+        amount: session.amount_total ? (session.amount_total / 100).toString() : "30.00",
+        description: `Registration fee from ${activatedUser.firstName} ${activatedUser.lastName} via Stripe`,
+        userId: activatedUser.id,
       });
     }
 
     res.json({
       success: true,
-      status: updatedUser.status,
+      status: activatedUser.status,
     });
   } catch (error: any) {
     logger.error("Stripe session verification failed:", error);

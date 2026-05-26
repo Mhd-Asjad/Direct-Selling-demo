@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   TrendingUp, Users, Wallet, DollarSign,
   Activity, ArrowUpRight, Clock, CheckCircle,
-  Zap, Network, Award, AlertCircle, CreditCard, Copy, Check, SendHorizonal, Upload
+  Zap, Network, Award, AlertCircle, CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -99,7 +99,7 @@ export default function DashboardPage() {
 
   const [coupon1, setCoupon1] = useState("");
   const [coupon2, setCoupon2] = useState("");
-  const [paymentTab, setPaymentTab] = useState<"stripe" | "manual">("manual");
+  const [paymentTab, setPaymentTab] = useState<"stripe" | "coupon">("stripe");
   const [copiedAddress, setCopiedAddress] = useState(false);
   const [depositForm, setDepositForm] = useState({ amountInUSDT: "", blockchainNetwork: "TRC20", senderWalletAddress: "", screenshotUrl: "" });
   const [myDeposits, setMyDeposits] = useState<any[]>([]);
@@ -332,21 +332,25 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Pending Activation Banner — full tabbed payment flow */}
+        {/* Pending Activation Banner */}
         {user?.status === "pending" && (
           <div className="bg-card border border-yellow-500/25 rounded-xl p-5 relative overflow-hidden space-y-5">
             {/* Header */}
             <div className="flex items-center gap-2 text-yellow-500 font-semibold text-sm">
               <AlertCircle className="w-4 h-4" />
-              Account Activation Required — Complete Course Purchase
+              Account Activation Required
             </div>
+
+            <p className="text-xs text-muted-foreground">
+              Your account is pending activation. You can activate via Stripe card payment, or ask your admin/sponsor to activate your account directly.
+            </p>
 
             {/* Payment Method Tabs */}
             <div className="flex gap-1 bg-secondary rounded-lg p-1 w-fit">
-              {(["manual", "stripe"] as const).map((tab) => (
+              {(["stripe", "coupon"] as const).map((tab) => (
                 <button
                   key={tab}
-                  onClick={() => setPaymentTab(tab)}
+                  onClick={() => setPaymentTab(tab as any)}
                   className={cn(
                     "px-4 py-1.5 rounded-md text-xs font-medium transition-all",
                     paymentTab === tab
@@ -354,152 +358,51 @@ export default function DashboardPage() {
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {tab === "manual" ? "📤 Manual USDT" : "💳 Stripe (Card)"}
+                  {tab === "stripe" ? "💳 Pay via Stripe" : "🎟️ Redeem Coupons"}
                 </button>
               ))}
             </div>
-
-            {/* ── MANUAL USDT TAB ────────────────────────────────────────────── */}
-            {paymentTab === "manual" && (
-              <div className="space-y-4">
-                <p className="text-xs text-muted-foreground">
-                  Send <strong className="text-foreground">≥ 1,200 USDT</strong> (≈ ₹1,00,000) to the platform wallet address below, then fill in your transaction details. An admin will review and issue your 2 activation coupons.
-                </p>
-
-                {/* Platform receiving address */}
-                <div className="p-3 rounded-lg bg-secondary border border-border space-y-1">
-                  <p className="text-xs text-muted-foreground font-medium">Platform USDT Receiving Address (TRC20 / ERC20 / BEP20)</p>
-                  <div className="flex items-center gap-2">
-                    <code className="text-xs text-foreground font-mono break-all flex-1">{platformUsdtAddress}</code>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard?.writeText(platformUsdtAddress);
-                        setCopiedAddress(true);
-                        setTimeout(() => setCopiedAddress(false), 2000);
-                      }}
-                      className="p-1.5 rounded-md hover:bg-card transition-colors shrink-0"
-                    >
-                      {copiedAddress ? <Check className="w-4 h-4 text-accent" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Submission form */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground font-medium">Amount Sent (USDT)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="1200.00"
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      value={depositForm.amountInUSDT}
-                      onChange={e => setDepositForm(f => ({ ...f, amountInUSDT: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground font-medium">Blockchain Network</label>
-                    <select
-                      className="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      value={depositForm.blockchainNetwork}
-                      onChange={e => setDepositForm(f => ({ ...f, blockchainNetwork: e.target.value }))}
-                    >
-                      <option value="TRC20">TRC20 (Tron)</option>
-                      <option value="ERC20">ERC20 (Ethereum)</option>
-                      <option value="BEP20">BEP20 (BSC)</option>
-                      <option value="SOL">Solana</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className="text-xs text-muted-foreground font-medium">Your Sending Wallet Address</label>
-                    <input
-                      type="text"
-                      placeholder="TXxx... or 0x..."
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      value={depositForm.senderWalletAddress}
-                      onChange={e => setDepositForm(f => ({ ...f, senderWalletAddress: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className="text-xs text-muted-foreground font-medium">Screenshot URL (optional proof)</label>
-                    <input
-                      type="url"
-                      placeholder="https://..."
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      value={depositForm.screenshotUrl}
-                      onChange={e => setDepositForm(f => ({ ...f, screenshotUrl: e.target.value }))}
-                    />
-                  </div>
-                </div>
-
-                <button
-                  disabled={submitManualDeposit.isPending || !depositForm.amountInUSDT || !depositForm.senderWalletAddress}
-                  onClick={() => submitManualDeposit.mutate(depositForm)}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-yellow-950 text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-yellow-500/20 disabled:opacity-50"
-                >
-                  <SendHorizonal className="w-4 h-4" />
-                  {submitManualDeposit.isPending ? "Submitting..." : "Submit Deposit for Review"}
-                </button>
-
-                {/* My deposit requests */}
-                {myDeposits.length > 0 && (
-                  <div className="space-y-2 border-t border-border/50 pt-4">
-                    <p className="text-xs font-medium text-muted-foreground">My Deposit Requests</p>
-                    <div className="space-y-2">
-                      {myDeposits.map((d) => (
-                        <div key={d.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-secondary text-xs">
-                          <div className="min-w-0 flex-1 space-y-0.5">
-                            <p className="text-muted-foreground">{d.amountInUSDT} USDT · {d.blockchainNetwork}</p>
-                            <p className="text-xs text-muted-foreground font-mono truncate">{d.senderWalletAddress}</p>
-                          </div>
-                          <div className="flex flex-col items-end gap-1 shrink-0">
-                            <span className={cn("px-2 py-0.5 rounded-full font-medium",
-                              d.status === "PENDING" ? "bg-yellow-500/10 text-yellow-500" :
-                              d.status === "APPROVED" ? "bg-accent/10 text-accent" : "bg-destructive/10 text-destructive"
-                            )}>{d.status}</span>
-                            {d.coupon1Code && (
-                              <span className="text-[10px] text-accent">Coupons issued ✓</span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* ── STRIPE TAB ─────────────────────────────────────────────────── */}
             {paymentTab === "stripe" && (
               <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Pay ₹1,00,000 securely by card via Stripe. Upon payment success, the system will directly activate your account and place you in the network tree automatically (no coupons required).
+                  Pay ₹1,00,000 securely by card via Stripe. Upon payment success, your account is instantly activated and placed in the network tree automatically.
                 </p>
                 <button
                   disabled={createCourseCheckoutSession.isPending}
-                  onClick={() => {
-                    createCourseCheckoutSession.mutate(user.id, {
-                      onSuccess: (sessionData) => { window.location.href = sessionData.url; },
-                      onError: (err: any) => {
-                        toast({ variant: "destructive", title: "Checkout Error", description: err.message || "Failed to create Stripe payment session." });
-                      },
-                    });
+                  onClick={async () => {
+                    try {
+                      const sessionData = await createCourseCheckoutSession.mutateAsync(user.id);
+                      if (sessionData?.url) {
+                        window.location.href = sessionData.url;
+                      } else {
+                        toast({ variant: "destructive", title: "Checkout Error", description: "No redirect URL returned from Stripe." });
+                      }
+                    } catch (err: any) {
+                      toast({ variant: "destructive", title: "Checkout Error", description: err.message || "Failed to create Stripe payment session." });
+                    }
                   }}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-yellow-950 text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-yellow-500/20 disabled:opacity-50"
                 >
                   <CreditCard className="w-4 h-4" />
                   {createCourseCheckoutSession.isPending ? "Connecting..." : "Pay ₹1,00,000 via Stripe →"}
                 </button>
+
+                {/* Admin transfer alternative */}
+                <div className="p-3 rounded-lg bg-secondary border border-border text-xs text-muted-foreground space-y-1">
+                  <p className="font-medium text-foreground">Prefer offline payment?</p>
+                  <p>Contact your admin or sponsor and provide them your User ID. They can activate your account directly and transfer the USDT balance to your wallet.</p>
+                  <p className="font-mono text-primary mt-1">Your User ID: <strong>{user.id}</strong></p>
+                </div>
               </div>
             )}
 
-            {/* ── STEP 2: COUPON REDEMPTION (Manual USDT Only) ──────────────── */}
-            {paymentTab === "manual" && (
-              <div className="space-y-2 border-t border-border/50 pt-4">
-                <h3 className="text-foreground font-medium text-sm">Step 2: Redeem Activation Coupons (For Manual USDT)</h3>
+            {/* ── COUPON REDEMPTION ──────────────────────────────────────────── */}
+            {paymentTab === "coupon" && (
+              <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  If you paid via Manual USDT, enter the two ₹50,000 coupon codes issued by the admin to activate your account (3000 BV, binary tree placement, commission eligibility). Stripe users do not need to do this.
+                  If your admin has issued you two ₹50,000 activation coupon codes, enter them below to activate your account (3000 BV, binary tree placement, commission eligibility).
                 </p>
                 <div className="flex flex-col sm:flex-row items-center gap-2">
                   <input
