@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 import { db, walletsTable, walletTransactionsTable, couponsTable, activityFeedTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { VerifyWalletPinBody, UpdateWalletPinBody, CreateCouponBody, RedeemCouponBody } from "@workspace/api-zod";
-import { debitWallet } from "../lib/commissions";
+import { debitWallet, creditWallet } from "../lib/commissions";
 
 const router: IRouter = Router();
 
@@ -36,6 +36,7 @@ router.get("/wallet", async (req, res): Promise<void> => {
   res.json({
     id: wallet.id,
     userId: wallet.userId,
+    walletId: wallet.walletId ?? null,
     totalEarned: parseFloat(wallet.totalEarned ?? "0"),
     totalSpent: parseFloat(wallet.totalSpent ?? "0"),
     availableBalance: parseFloat(wallet.availableBalance ?? "0"),
@@ -282,6 +283,7 @@ router.post("/wallet/coupons/redeem", async (req, res): Promise<void> => {
     return;
   }
 
+  const couponAmount = parseFloat(coupon.amount);
   const now = new Date();
   const [updated] = await db
     .update(couponsTable)
@@ -289,10 +291,13 @@ router.post("/wallet/coupons/redeem", async (req, res): Promise<void> => {
     .where(eq(couponsTable.code, body.data.code))
     .returning();
 
+  // ✅ Credit the coupon value into the user's wallet balance
+  await creditWallet(userId, couponAmount, `Coupon redeemed: ${body.data.code}`, `coupon:${coupon.id}`);
+
   await db.insert(activityFeedTable).values({
     userId,
     type: "coupon_redeemed",
-    message: `Redeemed coupon ${body.data.code} worth $${parseFloat(coupon.amount)}`,
+    message: `Redeemed coupon ${body.data.code} worth $${couponAmount.toFixed(2)} — balance credited`,
     amount: coupon.amount,
   });
 

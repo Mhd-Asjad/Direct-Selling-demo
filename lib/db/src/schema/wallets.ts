@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 export const walletsTable = pgTable("wallets", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().unique(),
+  walletId: text("wallet_id").unique(), // user-chosen human-readable wallet ID (e.g. WLT-JOHN123)
   totalEarned: numeric("total_earned", { precision: 12, scale: 2 }).notNull().default("0"),
   totalSpent: numeric("total_spent", { precision: 12, scale: 2 }).notNull().default("0"),
   availableBalance: numeric("available_balance", { precision: 12, scale: 2 }).notNull().default("0"),

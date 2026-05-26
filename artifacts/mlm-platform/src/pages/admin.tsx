@@ -34,7 +34,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
-const TABS = ["Overview", "USDT Deposits", "Payments", "Users", "Network", "BV Stats", "Courses", "Wash Reset"] as const;
+const TABS = ["Overview", "Activate Member", "USDT Deposits", "Payments", "Users", "Network", "BV Stats", "Courses", "Wash Reset"] as const;
 type Tab = typeof TABS[number];
 
 const washSchema = z.object({
@@ -68,6 +68,8 @@ export default function AdminPage() {
   const [usdtDeposits, setUsdtDeposits] = useState<any[]>([]);
   const [usdtDepositsLoading, setUsdtDepositsLoading] = useState(false);
   const [depositActionPending, setDepositActionPending] = useState<number | null>(null);
+  const [transferForm, setTransferForm] = useState({ targetWalletId: "", amountUSDT: "1200", note: "" });
+  const [transferPending, setTransferPending] = useState(false);
 
   const { data: financialStats } = useGetFinancialStats({
     query: { queryKey: getGetFinancialStatsQueryKey(), enabled: !!isAdmin },
@@ -170,6 +172,34 @@ export default function AdminPage() {
   };
 
   useEffect(() => { if (activeTab === "USDT Deposits") fetchUsdtDeposits(); }, [activeTab, isAdmin]);
+
+  const handleTransferActivation = async () => {
+    if (!transferForm.targetWalletId.trim()) {
+      toast({ title: "Wallet ID required", description: "Enter the member's Wallet ID.", variant: "destructive" });
+      return;
+    }
+    setTransferPending(true);
+    try {
+      const res = await fetch("/api/admin/transfer-activation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetWalletId: transferForm.targetWalletId.trim().toUpperCase(),
+          amountUSDT: parseFloat(transferForm.amountUSDT) || 1200,
+          note: transferForm.note || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: "✅ Activation Complete!", description: data.message });
+      setTransferForm({ targetWalletId: "", amountUSDT: "1200", note: "" });
+      queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+    } catch (err: any) {
+      toast({ title: "Activation Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setTransferPending(false);
+    }
+  };
 
   const { data: courses, isLoading: coursesLoading } = useListAdminCourses({
     query: { queryKey: getListAdminCoursesQueryKey(), enabled: !!isAdmin && activeTab === "Courses" },
@@ -308,6 +338,100 @@ export default function AdminPage() {
             </button>
           ))}
         </div>
+
+        {/* ACTIVATE MEMBER TAB */}
+        {activeTab === "Activate Member" && (
+          <div className="space-y-5">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Admin — Transfer Activation</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Directly activate a pending member by transferring USDT to their wallet. This bypasses the user-side deposit flow.
+              </p>
+            </div>
+
+            <div className="bg-card border border-card-border rounded-xl p-5 space-y-4">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-accent" /> Transfer & Activate
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Member Wallet ID *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. JOHN-2024"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={transferForm.targetWalletId}
+                    onChange={e => setTransferForm(f => ({ ...f, targetWalletId: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "") }))}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Enter the Wallet ID the member set during registration</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Amount (USDT)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="1200"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={transferForm.amountUSDT}
+                    onChange={e => setTransferForm(f => ({ ...f, amountUSDT: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground">Note (optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Offline cash payment received"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={transferForm.note}
+                    onChange={e => setTransferForm(f => ({ ...f, note: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-600 dark:text-yellow-400">
+                ⚠️ This will immediately set the user's status to <strong>active</strong>, place them in the binary tree, and credit {transferForm.amountUSDT || "1200"} USDT to their wallet. This action cannot be undone.
+              </div>
+
+              <Button
+                onClick={handleTransferActivation}
+                disabled={transferPending || !transferForm.targetWalletId}
+                className="w-full sm:w-auto"
+              >
+                <UserCheck className="w-4 h-4 mr-2" />
+                {transferPending ? "Activating..." : "Activate Member & Transfer USDT"}
+              </Button>
+            </div>
+
+            {/* Quick reference: pending users */}
+            <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-border">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Pending Members (quick reference)</p>
+              </div>
+              <div className="divide-y divide-border max-h-64 overflow-auto">
+                {users?.filter(u => u.status === "pending").length === 0 ? (
+                  <p className="p-4 text-sm text-muted-foreground text-center">No pending members</p>
+                ) : (
+                  users?.filter(u => u.status === "pending").map(u => (
+                    <div key={u.id} className="flex items-center justify-between px-5 py-3 hover:bg-secondary/20 transition-colors">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{u.firstName} {u.lastName}</p>
+                        <p className="text-xs text-muted-foreground">{u.email}</p>
+                      </div>
+                      <button
+                        className="text-xs text-primary hover:underline font-mono"
+                        onClick={() => setTransferForm(f => ({ ...f, targetWalletId: (u as any).walletId ?? String(u.id) }))}
+                      >
+                        {(u as any).walletId ? `WID: ${(u as any).walletId}` : `ID: ${u.id}`} — Use
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* USDT DEPOSITS TAB */}
         {activeTab === "USDT Deposits" && (

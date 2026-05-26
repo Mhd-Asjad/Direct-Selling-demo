@@ -15,6 +15,10 @@ import { cn } from "@/lib/utils";
 // Step 1: Account Credentials
 const step1Schema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters").max(20, "Username too long"),
+  walletId: z.string()
+    .min(3, "Wallet ID must be at least 3 characters")
+    .max(20, "Wallet ID too long")
+    .regex(/^[A-Za-z0-9_-]+$/, "Only letters, numbers, hyphens and underscores allowed"),
   email: z.string().email("Valid email required"),
   password: z.string().min(8, "Password must be at least 8 characters"),
   confirmPassword: z.string().min(1, "Confirm your password"),
@@ -76,7 +80,7 @@ export default function RegisterPage() {
 
   const form1 = useForm({
     resolver: zodResolver(step1Schema),
-    defaultValues: { username: "", email: "", password: "", confirmPassword: "" },
+    defaultValues: { username: "", walletId: "", email: "", password: "", confirmPassword: "" },
   });
 
   const form2 = useForm({
@@ -269,6 +273,26 @@ export default function RegisterPage() {
                       <FormControl>
                         <Input {...field} placeholder="distributor_pro" data-testid="input-username" className="bg-background border-input" />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form1.control} name="walletId" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5">
+                        <Wallet className="w-3.5 h-3.5 text-primary" /> Wallet ID
+                        <span className="text-muted-foreground font-normal text-xs">(unique, used by admin to send you USDT)</span>
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder="e.g. JOHN-2024"
+                          data-testid="input-wallet-id"
+                          className="bg-background border-input font-mono"
+                          onChange={e => field.onChange(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ""))}
+                        />
+                      </FormControl>
+                      <p className="text-[11px] text-muted-foreground">Letters, numbers, hyphens and underscores only. Cannot be changed later.</p>
                       <FormMessage />
                     </FormItem>
                   )} />

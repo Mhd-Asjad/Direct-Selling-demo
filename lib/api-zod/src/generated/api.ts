@@ -55,6 +55,7 @@ export const RegisterUserBody = zod.object({
   "placementSide": zod.enum(['left', 'right']).optional(),
   "usdtAddress": zod.string().optional(),
   "bankDetails": zod.string().optional(),
+  "walletId": zod.string().optional(),
   "agreedToTerms": zod.boolean()
 })
 
@@ -500,6 +501,7 @@ export const GetCommissionStatsResponse = zod.object({
 export const GetWalletResponse = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
+  "walletId": zod.string().nullish(),
   "totalEarned": zod.number(),
   "totalSpent": zod.number(),
   "availableBalance": zod.number(),

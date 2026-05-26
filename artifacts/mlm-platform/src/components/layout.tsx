@@ -39,8 +39,10 @@ export default function Layout({ children }: LayoutProps) {
   const logout = useLogoutUser({
     mutation: {
       onSuccess: () => {
-        queryClient.setQueryData(getGetCurrentUserQueryKey(), null);
-        queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() });
+        // Remove the query entirely so it won't refetch before redirect
+        queryClient.removeQueries({ queryKey: getGetCurrentUserQueryKey() });
+        // Clear all cached query data to prevent stale data showing after re-login
+        queryClient.clear();
         setLocation("/login");
       },
     },
