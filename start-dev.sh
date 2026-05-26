@@ -4,7 +4,7 @@
 set -e
 
 # Configuration
-export DATABASE_URL="postgresql://postgres:postgres@localhost:5433/direct_selling"
+source .env
 export PORT_API=8080
 export PORT_WEB=5173
 
