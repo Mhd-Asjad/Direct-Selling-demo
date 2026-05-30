@@ -7,6 +7,9 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// Required to serve secure cookies behind a reverse proxy (like Render)
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,
