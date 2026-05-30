@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
-    "start": "node --env-file=../../.env --enable-source-maps ./dist/index.mjs",
-    "seed": "tsx --env-file=../../.env ./src/seed.ts",
+    "start": "node --env-file=.env --enable-source-maps ./dist/index.mjs",
+    "seed": "tsx --env-file=.env ./src/seed.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

@@ -13,7 +13,7 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH || "/";
 
-const workspaceRoot = path.resolve(import.meta.dirname, "../..");
+const workspaceRoot = path.resolve(import.meta.dirname, "..");
 
 async function loadReplitPlugins() {
   try {
@@ -43,7 +43,6 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "src"),
       "@assets": path.resolve(
         import.meta.dirname,
-        "..",
         "..",
         "attached_assets",
       ),
