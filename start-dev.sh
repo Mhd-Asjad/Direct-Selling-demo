@@ -4,7 +4,9 @@
 set -e
 
 # Configuration
-source .env
+if [ -f "backend/.env" ]; then
+  source backend/.env
+fi
 export PORT_API=8080
 export PORT_WEB=5173
 
