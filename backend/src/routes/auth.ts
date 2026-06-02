@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcrypt";
-import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable, financialLedgerTable, couponsTable, cryptoTransactionsTable, manualDepositRequestsTable } from "@workspace/db";
+import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable, financialLedgerTable, couponsTable, cryptoTransactionsTable, manualDepositRequestsTable } from "../db";
 import { eq, and, inArray } from "drizzle-orm";
-import { RegisterUserBody, LoginUserBody, GetCurrentUserResponse, PendingRegistration, StripeCreateCheckoutSessionBody, StripeVerifyCheckoutSessionBody } from "@workspace/api-zod";
+import { RegisterUserBody, LoginUserBody, GetCurrentUserResponse, PendingRegistration, StripeCreateCheckoutSessionBody, StripeVerifyCheckoutSessionBody } from "../api-zod";
 import { logger } from "../lib/logger";
 import Stripe from "stripe";
 import { activateUser } from "../lib/activation";
@@ -196,8 +196,21 @@ router.get("/auth/me", async (req, res): Promise<void> => {
     res.status(401).json({ error: "User not found" });
     return;
   }
+  let sponsorName = null;
+  if (user.sponsorId) {
+    const [sponsor] = await db
+      .select({ firstName: usersTable.firstName, lastName: usersTable.lastName })
+      .from(usersTable)
+      .where(eq(usersTable.id, user.sponsorId));
+    if (sponsor) {
+      sponsorName = `${sponsor.firstName} ${sponsor.lastName}`;
+    }
+  }
 
-  res.json(formatUser(user));
+  res.json({
+    ...formatUser(user),
+    sponsorName,
+  });
 });
 
 export function formatUser(user: typeof usersTable.$inferSelect) {
@@ -211,6 +224,7 @@ export function formatUser(user: typeof usersTable.$inferSelect) {
     countryCode: user.countryCode ?? null,
     status: user.status,
     isPaid: user.isPaid,
+    isKycVerified: user.isKycVerified,
     role: user.role,
     referralCode: user.referralCode,
     referrerId: user.referrerId ?? null,
@@ -375,9 +389,48 @@ router.post("/auth/verify-checkout-session", async (req, res): Promise<void> => 
     }
 
     const userId = parseInt(userIdStr);
+    const sessionType = session.metadata?.type;
 
-    // ✅ Fully activate user — sets status=active, places in tree, propagates BV, awards commissions
-    const activatedUser = await activateUser(userId, 3000);
+    if (sessionType === "course_package") {
+      // ✅ Fully activate user for course purchase
+      const activatedUser = await activateUser(userId, 3000, 1000);
+
+      // Log to financial ledger so admin can see it in Overview
+      const [existingLog] = await db
+        .select()
+        .from(financialLedgerTable)
+        .where(
+          and(
+            eq(financialLedgerTable.userId, userId),
+            eq(financialLedgerTable.type, "inflow")
+          )
+        );
+      if (!existingLog) {
+        await db.insert(financialLedgerTable).values({
+          type: "inflow",
+          amount: session.amount_total ? (session.amount_total / 100).toString() : "1200.00",
+          description: `Course package purchase — ${activatedUser.firstName} ${activatedUser.lastName} via Stripe (Session: ${sessionId})`,
+          userId,
+        });
+      }
+
+      res.json({
+        success: true,
+        status: activatedUser.status,
+      });
+      return;
+    }
+
+    const [updatedUser] = await db
+      .update(usersTable)
+      .set({ isPaid: true })
+      .where(eq(usersTable.id, userId))
+      .returning();
+
+    if (!updatedUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
 
     // Log financial inflow if not already present
     const existingInflows = await db
@@ -394,14 +447,14 @@ router.post("/auth/verify-checkout-session", async (req, res): Promise<void> => 
       await db.insert(financialLedgerTable).values({
         type: "inflow",
         amount: session.amount_total ? (session.amount_total / 100).toString() : "30.00",
-        description: `Registration fee from ${activatedUser.firstName} ${activatedUser.lastName} via Stripe`,
-        userId: activatedUser.id,
+        description: `Registration fee from ${updatedUser.firstName} ${updatedUser.lastName} via Stripe`,
+        userId: updatedUser.id,
       });
     }
 
     res.json({
       success: true,
-      status: activatedUser.status,
+      status: updatedUser.status,
     });
   } catch (error: any) {
     logger.error("Stripe session verification failed:", error);
@@ -464,7 +517,7 @@ router.post("/stripe/webhook", async (req, res): Promise<void> => {
 
         if (sessionType === "course_package") {
           // Direct activation for Stripe course purchase (no coupons needed)
-          await activateUser(userId, 3000);
+          await activateUser(userId, 3000, 1000);
           logger.info(`Successfully activated user ${userId} directly via Stripe Webhook`);
         } else {
           // Original logic for $30 fee
@@ -536,44 +589,20 @@ router.post("/auth/redeem-activation-coupons", async (req, res): Promise<void> =
     return;
   }
 
-  // Ensure both are 50000
-  if (parseFloat(coupons[0].amount) !== 50000 || parseFloat(coupons[1].amount) !== 50000) {
-    res.status(400).json({ error: "Both coupons must be valued at 50000 each." });
-    return;
-  }
-
-  // ── STRICT COURSE PURCHASE VERIFICATION GUARD ─────────────────────────────
-  // Before activating the account, verify that a real course purchase happened:
-  //   Option A: An APPROVED manual USDT deposit exists for this user
-  //   Option B: A confirmed Stripe course_package session exists for this user
-  // If neither exists, block activation.
-  const [approvedManualDeposit] = await db
-    .select()
-    .from(manualDepositRequestsTable)
-    .where(
-      and(
-        eq(manualDepositRequestsTable.userId, userId),
-        eq(manualDepositRequestsTable.status, "APPROVED")
-      )
-    );
-
-  const [stripeCoursePurchase] = await db
-    .select()
-    .from(cryptoTransactionsTable)
-    .where(
-      and(
-        eq(cryptoTransactionsTable.userId, userId),
-        eq(cryptoTransactionsTable.network, "stripe"),
-        eq(cryptoTransactionsTable.status, "confirmed")
-      )
-    );
-
-  if (!approvedManualDeposit && !stripeCoursePurchase) {
-    res.status(402).json({
-      error: "Course purchase not verified. Please complete the ₹1,00,000 course package payment first (via Stripe or Manual USDT) before redeeming activation coupons."
+  // Validate combined coupon value meets the course activation threshold
+  const COURSE_AMOUNT_INR = 100000; // ₹1,00,000
+  const totalCouponValue = coupons.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+  if (totalCouponValue < COURSE_AMOUNT_INR) {
+    res.status(400).json({
+      error: `Combined coupon value (₹${totalCouponValue.toLocaleString()}) is less than the required course amount of ₹${COURSE_AMOUNT_INR.toLocaleString()}. Please ensure both coupons are valid activation coupons worth ₹50,000 each.`
     });
     return;
   }
+
+  // ── COUPON LEGITIMACY GUARD ───────────────────────────────────────────────
+  // The coupons themselves are the proof: they must be active, of type
+  // 'activation', owned by the user, and their combined value ≥ ₹1,00,000.
+  // This handles all paths: admin-issued, USDT deposit approval, Stripe purchase.
 
   try {
     // Redeem both coupons
@@ -583,7 +612,7 @@ router.post("/auth/redeem-activation-coupons", async (req, res): Promise<void> =
       .where(inArray(couponsTable.id, coupons.map(c => c.id)));
 
     // Activate the user with 3000 BV
-    const activatedUser = await activateUser(userId, 3000);
+    const activatedUser = await activateUser(userId, 3000, 1000);
 
     res.json({
       success: true,

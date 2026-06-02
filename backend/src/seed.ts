@@ -1,4 +1,4 @@
-import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable } from "@workspace/db";
+import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable } from "./db";
 import bcrypt from "bcrypt";
 import { eq } from "drizzle-orm";
 
@@ -42,7 +42,7 @@ async function seed() {
     availableBalance: "450",
   });
 
-  const { coursesTable } = await import("@workspace/db");
+  const { coursesTable } = await import("./db");
   await db.insert(coursesTable).values([
     { name: "starter", description: "Starter Package", price: "100", bvAmount: "100", isActive: true },
     { name: "pro", description: "Pro Package", price: "500", bvAmount: "500", isActive: true },

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable, financialLedgerTable } from "@workspace/db";
-import { eq, ilike, or } from "drizzle-orm";
-import { UpdateUserBody, UpdateUserStatusBody, ListUsersQueryParams, GetUserParams, UpdateUserParams, UpdateUserStatusParams, ApprovePaymentParams } from "@workspace/api-zod";
+import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable, financialLedgerTable } from "../db";
+import { eq, ilike, or, inArray } from "drizzle-orm";
+import { UpdateUserBody, UpdateUserStatusBody, ListUsersQueryParams, GetUserParams, UpdateUserParams, UpdateUserStatusParams, ApprovePaymentParams } from "../api-zod";
 import { formatUser } from "./auth";
 import { bfsPlacement, propagateBv } from "../lib/bfs";
 import { awardDirectReferralCommission, checkAndAwardBinaryCycles, creditWallet } from "../lib/commissions";
@@ -13,7 +13,6 @@ const BV_PER_REGISTRATION = 30;
 
 router.get("/users", async (req, res): Promise<void> => {
   const params = ListUsersQueryParams.safeParse(req.query);
-  let query = db.select().from(usersTable);
 
   const users = await db.select().from(usersTable);
   let filtered = users;
@@ -33,7 +32,17 @@ router.get("/users", async (req, res): Promise<void> => {
     }
   }
 
-  res.json(filtered.map(formatUser));
+  const userIds = filtered.map(u => u.id);
+  const wallets = userIds.length > 0 
+    ? await db.select({ userId: walletsTable.userId, walletId: walletsTable.walletId }).from(walletsTable).where(inArray(walletsTable.userId, userIds))
+    : [];
+  
+  const walletMap = new Map(wallets.map(w => [w.userId, w.walletId]));
+
+  res.json(filtered.map(u => ({
+    ...formatUser(u),
+    walletId: walletMap.get(u.id) ?? null
+  })));
 });
 
 router.get("/users/:id", async (req, res): Promise<void> => {
@@ -112,7 +121,7 @@ router.patch("/users/:id/status", async (req, res): Promise<void> => {
 
 import { activateUser } from "../lib/activation";
 
-router.post("/users/:id/approve-payment", async (req, res): Promise<void> => {
+router.post("/users/:id/approve-kyc", async (req, res): Promise<void> => {
   const params = ApprovePaymentParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid user ID" });
@@ -120,10 +129,31 @@ router.post("/users/:id/approve-payment", async (req, res): Promise<void> => {
   }
 
   try {
-    const activated = await activateUser(params.data.id);
-    res.json(formatUser(activated));
+    const [updated] = await db
+      .update(usersTable)
+      .set({ isKycVerified: true })
+      .where(eq(usersTable.id, params.data.id))
+      .returning();
+
+    if (!updated) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    if (updated.isPaid && updated.status === "pending") {
+      const isCoursePackage = updated.packageType === "course_package" || updated.packageType === "course";
+      const bv = isCoursePackage ? 3000 : 30;
+      const comm = isCoursePackage ? 1000 : 30;
+      try {
+        await activateUser(updated.id, bv, comm);
+      } catch (e: any) {
+        console.error(`Failed to activate user ${updated.id} during KYC approval:`, e);
+      }
+    }
+
+    res.json(formatUser(updated));
   } catch (error: any) {
-    res.status(400).json({ error: error.message || "Failed to activate user" });
+    res.status(500).json({ error: error.message || "Failed to approve KYC" });
   }
 });
 

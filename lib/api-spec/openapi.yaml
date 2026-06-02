@@ -894,6 +894,8 @@ components:
           type: string
         lastName:
           type: string
+        walletId:
+          type: ["string", "null"]
         mobileNumber:
           type: ["string", "null"]
         address:

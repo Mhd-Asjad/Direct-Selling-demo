@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import {
   useListCommissions, getListCommissionsQueryKey,
   useGetCommissionStats, getGetCommissionStatsQueryKey,
-} from "@workspace/api-client-react";
+} from "@/api-client";
 import { useLocation } from "wouter";
 import { useEffect } from "react";
 import { DollarSign, Zap, TrendingUp, Award, BarChart3 } from "lucide-react";
@@ -75,7 +75,7 @@ export default function CommissionsPage() {
         </div>
 
         {/* BV Cycle tracker */}
-        <div className="bg-card border border-card-border rounded-xl p-5">
+        {/* <div className="bg-card border border-card-border rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 className="w-4 h-4 text-primary" />
             <h2 className="text-sm font-semibold text-foreground">Binary Cycle Tracker</h2>
@@ -115,7 +115,7 @@ export default function CommissionsPage() {
               <span className="text-xs font-bold text-foreground">{stats?.pendingCycles ?? 0}</span>
             </div>
           </div>
-        </div>
+        </div> */}
 
         {/* Commission table */}
         <div className="bg-card border border-card-border rounded-xl overflow-hidden">

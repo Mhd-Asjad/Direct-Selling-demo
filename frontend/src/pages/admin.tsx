@@ -14,10 +14,11 @@ import {
   useCreateAdminCourse,
   useUpdateAdminCourse,
   useDeleteAdminCourse,
-} from "@workspace/api-client-react";
+} from "@/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api-fetch";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -29,7 +30,8 @@ import {
   TrendingUp, TrendingDown, Users, BarChart3,
   RefreshCw, Zap, AlertTriangle, CheckCircle, Ban, UserCheck,
   Network, DollarSign, Activity, History, BookOpen, Plus, Pencil, Trash2,
-  Camera, FileText,
+  Camera, FileText, Award, ShieldCheck, ShieldAlert, CreditCard, User, X,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -70,6 +72,15 @@ export default function AdminPage() {
   const [depositActionPending, setDepositActionPending] = useState<number | null>(null);
   const [transferForm, setTransferForm] = useState({ targetWalletId: "", amountUSDT: "1200", note: "" });
   const [transferPending, setTransferPending] = useState(false);
+  const [couponForm, setCouponForm] = useState({ targetWalletId: "", note: "" });
+  const [couponPending, setCouponPending] = useState(false);
+  const [issuedCoupons, setIssuedCoupons] = useState<{ coupon1: string; coupon2: string; message: string } | null>(null);
+  const [stripePayments, setStripePayments] = useState<any[]>([]);
+  const [stripePaymentsLoading, setStripePaymentsLoading] = useState(false);
+  const [paymentsSubTab, setPaymentsSubTab] = useState<"manual" | "stripe">("stripe");
+  const [profileUser, setProfileUser] = useState<any | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [kycPending, setKycPending] = useState<number | null>(null);
 
   const { data: financialStats } = useGetFinancialStats({
     query: { queryKey: getGetFinancialStatsQueryKey(), enabled: !!isAdmin },
@@ -101,7 +112,7 @@ export default function AdminPage() {
     if (!isAdmin) return;
     setSubmissionsLoading(true);
     try {
-      const res = await fetch("/api/onboarding/admin/submissions");
+      const res = await apiFetch("/api/onboarding/admin/submissions");
       if (res.ok) setSubmissions(await res.json());
     } finally { setSubmissionsLoading(false); }
   };
@@ -109,7 +120,7 @@ export default function AdminPage() {
   const handleSubmissionAction = async (id: number, action: "approve" | "reject", reason?: string) => {
     setActionPending(id);
     try {
-      const res = await fetch(`/api/onboarding/admin/submissions/${id}/${action}`, {
+      const res = await apiFetch(`/api/onboarding/admin/submissions/${id}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action === "reject" ? { reason } : {}),
@@ -123,14 +134,11 @@ export default function AdminPage() {
       toast({ title: "Action failed", description: err.message, variant: "destructive" });
     } finally { setActionPending(null); }
   };
-
-  useEffect(() => { if (activeTab === "Payments") fetchSubmissions(); }, [activeTab, isAdmin]);
-
   const fetchUsdtDeposits = async () => {
     if (!isAdmin) return;
     setUsdtDepositsLoading(true);
     try {
-      const res = await fetch("/api/admin/deposits");
+      const res = await apiFetch("/api/admin/deposits");
       if (res.ok) setUsdtDeposits(await res.json());
     } finally { setUsdtDepositsLoading(false); }
   };
@@ -138,7 +146,7 @@ export default function AdminPage() {
   const handleDepositApprove = async (id: number) => {
     setDepositActionPending(id);
     try {
-      const res = await fetch(`/api/admin/deposits/${id}/approve`, { method: "POST" });
+      const res = await apiFetch(`/api/admin/deposits/${id}/approve`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast({
@@ -157,7 +165,7 @@ export default function AdminPage() {
     if (reason === null) return; // cancelled
     setDepositActionPending(id);
     try {
-      const res = await fetch(`/api/admin/deposits/${id}/reject`, {
+      const res = await apiFetch(`/api/admin/deposits/${id}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason }),
@@ -173,6 +181,68 @@ export default function AdminPage() {
 
   useEffect(() => { if (activeTab === "USDT Deposits") fetchUsdtDeposits(); }, [activeTab, isAdmin]);
 
+  const fetchStripePayments = async () => {
+    if (!isAdmin) return;
+    setStripePaymentsLoading(true);
+    try {
+      const res = await apiFetch("/api/admin/stripe-payments");
+      if (res.ok) setStripePayments(await res.json());
+    } finally { setStripePaymentsLoading(false); }
+  };
+
+  useEffect(() => { if (activeTab === "Payments") { fetchSubmissions(); fetchStripePayments(); } }, [activeTab, isAdmin]);
+
+  const handleApproveKyc = async (userId: number) => {
+    setKycPending(userId);
+    try {
+      const res = await apiFetch(`/api/admin/users/${userId}/approve-kyc`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: "KYC Approved ✓", description: "User is now KYC verified." });
+      queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+    } catch (err: any) {
+      toast({ title: "KYC approval failed", description: err.message, variant: "destructive" });
+    } finally { setKycPending(null); }
+  };
+
+  const fetchUserProfile = async (userId: number) => {
+    setProfileLoading(true);
+    setProfileUser(null);
+    try {
+      const res = await apiFetch(`/api/admin/users/${userId}/profile`);
+      if (res.ok) setProfileUser(await res.json());
+    } finally { setProfileLoading(false); }
+  };
+
+  const handleIssueCoupons = async () => {
+    if (!couponForm.targetWalletId.trim()) {
+      toast({ title: "Wallet ID required", description: "Enter the member's Wallet ID.", variant: "destructive" });
+      return;
+    }
+    setCouponPending(true);
+    setIssuedCoupons(null);
+    try {
+      const res = await apiFetch("/api/admin/issue-coupons", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetWalletId: couponForm.targetWalletId.trim().toUpperCase(),
+          note: couponForm.note || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setIssuedCoupons({ coupon1: data.coupon1, coupon2: data.coupon2, message: data.message });
+      setCouponForm({ targetWalletId: "", note: "" });
+      toast({ title: "✅ Coupons Issued!", description: `Coupon codes generated. Share them with the user.` });
+      queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+    } catch (err: any) {
+      toast({ title: "Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setCouponPending(false);
+    }
+  };
+
   const handleTransferActivation = async () => {
     if (!transferForm.targetWalletId.trim()) {
       toast({ title: "Wallet ID required", description: "Enter the member's Wallet ID.", variant: "destructive" });
@@ -180,7 +250,7 @@ export default function AdminPage() {
     }
     setTransferPending(true);
     try {
-      const res = await fetch("/api/admin/transfer-activation", {
+      const res = await apiFetch("/api/admin/transfer-activation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -191,11 +261,13 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast({ title: "✅ Activation Complete!", description: data.message });
+      // Show the issued coupons (same display as issue-coupons)
+      setIssuedCoupons({ coupon1: data.coupon1, coupon2: data.coupon2, message: data.message });
+      toast({ title: "✅ Coupons Issued!", description: "2 activation coupons sent to user's coupon section." });
       setTransferForm({ targetWalletId: "", amountUSDT: "1200", note: "" });
       queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
     } catch (err: any) {
-      toast({ title: "Activation Failed", description: err.message, variant: "destructive" });
+      toast({ title: "Issuance Failed", description: err.message, variant: "destructive" });
     } finally {
       setTransferPending(false);
     }
@@ -218,7 +290,7 @@ export default function AdminPage() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
-        toast({ title: "Payment approved — user activated" });
+        toast({ title: "KYC approved successfully" });
       },
     },
   });
@@ -404,6 +476,79 @@ export default function AdminPage() {
               </Button>
             </div>
 
+            {/* Issue Activation Coupons */}
+            <div className="bg-card border border-card-border rounded-xl p-5 space-y-4">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <Award className="w-4 h-4 text-primary" /> Issue Activation Coupons
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Issue 2 activation coupons (₹50,000 each) to a pending member after verifying their offline/cash payment.
+                The user will enter both codes on their dashboard to activate their account.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Member Wallet ID *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. JOHN-2024"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={couponForm.targetWalletId}
+                    onChange={e => setCouponForm(f => ({ ...f, targetWalletId: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "") }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Payment note (optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Cash payment received on 01/06/26"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={couponForm.note}
+                    onChange={e => setCouponForm(f => ({ ...f, note: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <Button
+                onClick={handleIssueCoupons}
+                disabled={couponPending || !couponForm.targetWalletId}
+                variant="outline"
+                className="border-primary/30 text-primary hover:bg-primary/10"
+              >
+                <Award className="w-4 h-4 mr-2" />
+                {couponPending ? "Generating..." : "Issue 2 Activation Coupons"}
+              </Button>
+
+              {issuedCoupons && (
+                <div className="p-4 rounded-lg bg-accent/10 border border-accent/25 space-y-3">
+                  <p className="text-xs font-semibold text-accent flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5" /> Coupons Generated — Share with member
+                  </p>
+                  <p className="text-xs text-muted-foreground">{issuedCoupons.message}</p>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2 p-2 rounded bg-secondary font-mono text-sm text-foreground">
+                      <span>{issuedCoupons.coupon1}</span>
+                      <button
+                        className="text-xs text-primary hover:underline"
+                        onClick={() => navigator.clipboard?.writeText(issuedCoupons.coupon1)}
+                      >Copy</button>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 p-2 rounded bg-secondary font-mono text-sm text-foreground">
+                      <span>{issuedCoupons.coupon2}</span>
+                      <button
+                        className="text-xs text-primary hover:underline"
+                        onClick={() => navigator.clipboard?.writeText(issuedCoupons.coupon2)}
+                      >Copy</button>
+                    </div>
+                  </div>
+                  <button
+                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                    onClick={() => setIssuedCoupons(null)}
+                  >Dismiss</button>
+                </div>
+              )}
+            </div>
+
             {/* Quick reference: pending users */}
             <div className="bg-card border border-card-border rounded-xl overflow-hidden">
               <div className="px-5 py-3 border-b border-border">
@@ -520,100 +665,173 @@ export default function AdminPage() {
 
         {/* PAYMENTS TAB */}
         {activeTab === "Payments" && (
-
           <div className="space-y-4">
+            {/* Sub-tab bar */}
             <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">Payment Submissions</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Review and approve manual payment submissions from new users</p>
+              <div className="flex gap-1 bg-secondary rounded-lg p-1">
+                {(["stripe", "manual"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setPaymentsSubTab(t)}
+                    className={cn(
+                      "px-4 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                      paymentsSubTab === t ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {t === "stripe" ? <><CreditCard className="w-3 h-3" /> Stripe Payments</> : <><FileText className="w-3 h-3" /> Manual Submissions</>}
+                  </button>
+                ))}
               </div>
-              <Button size="sm" variant="outline" onClick={fetchSubmissions} disabled={submissionsLoading}>
-                <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", submissionsLoading && "animate-spin")} /> Refresh
+              <Button size="sm" variant="outline" onClick={() => { fetchSubmissions(); fetchStripePayments(); }} disabled={submissionsLoading || stripePaymentsLoading}>
+                <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", (submissionsLoading || stripePaymentsLoading) && "animate-spin")} /> Refresh
               </Button>
             </div>
 
-            <div className="bg-card border border-card-border rounded-xl overflow-hidden">
-              {submissionsLoading ? (
-                <div className="p-8 text-center"><div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" /></div>
-              ) : submissions.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">No payment submissions yet</div>
-              ) : (
-                <div className="divide-y divide-border">
-                  {submissions.map((s) => (
-                    <div key={s.id} className="p-5">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-foreground text-sm">User #{s.userId}</span>
-                            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
-                              s.paymentMethod === "manual_usdt" ? "bg-blue-500/10 text-blue-400" : "bg-green-500/10 text-green-400"
-                            )}>
-                              {s.paymentMethod === "manual_usdt" ? "USDT Transfer" : "Cash in Hand"}
-                            </span>
-                            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
-                              s.status === "pending" ? "bg-yellow-500/10 text-yellow-500" :
-                              s.status === "approved" ? "bg-accent/10 text-accent" : "bg-destructive/10 text-destructive"
-                            )}>{s.status}</span>
-                          </div>
-                          <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
-                            {s.paymentMethod === "manual_usdt" ? (
-                              <>
-                                <span>Wallet: <span className="text-foreground font-mono">{s.senderWalletAddress ?? "—"}</span></span>
-                                <span>Network: <span className="text-foreground">{s.blockchainNetwork ?? "—"}</span></span>
-                                <span>Amount: <span className="text-foreground font-semibold">{s.transferredAmount ? `$${parseFloat(s.transferredAmount).toFixed(2)}` : "—"}</span></span>
-                                <span>Date: <span className="text-foreground">{s.paymentDateTime ? new Date(s.paymentDateTime).toLocaleString() : "—"}</span></span>
-                              </>
-                            ) : (
-                              <>
-                                <span>Ref: <span className="text-foreground font-mono">{s.paymentReferenceNumber ?? "—"}</span></span>
-                                <span>Collector: <span className="text-foreground">{s.collectorName ?? "—"} (ID: {s.collectorId ?? "—"})</span></span>
-                                <span>Date: <span className="text-foreground">{s.paymentDate ? new Date(s.paymentDate).toLocaleDateString() : "—"}</span></span>
-                                {s.remarks && <span className="col-span-2">Remarks: <span className="text-foreground">{s.remarks}</span></span>}
-                              </>
-                            )}
-                            {s.paymentScreenshotUrl && (
-                              <a href={s.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline col-span-2">📎 View Screenshot</a>
-                            )}
-                            <span className="text-muted-foreground/60">Submitted: {new Date(s.createdAt).toLocaleString()}</span>
-                          </div>
-                          {s.rejectionReason && (
-                            <p className="mt-2 text-xs text-destructive bg-destructive/5 px-2 py-1 rounded">Rejected: {s.rejectionReason}</p>
-                          )}
-                        </div>
-                        {s.status === "pending" && (
-                          <div className="flex flex-col gap-2 shrink-0">
-                            <Button
-                              size="sm"
-                              className="h-8 px-3 text-xs"
-                              onClick={() => handleSubmissionAction(s.id, "approve")}
-                              disabled={actionPending === s.id}
-                            >
-                              <CheckCircle className="w-3 h-3 mr-1" /> Approve
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-8 px-3 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                              onClick={() => {
-                                const reason = prompt("Rejection reason:");
-                                if (reason !== null) handleSubmissionAction(s.id, "reject", reason);
-                              }}
-                              disabled={actionPending === s.id}
-                            >
-                              <Ban className="w-3 h-3 mr-1" /> Reject
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+            {/* ── Stripe Payments sub-tab ── */}
+            {paymentsSubTab === "stripe" && (
+              <div className="space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">Stripe Course Purchases</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">All Stripe-processed course package payments. Accounts are auto-activated on payment.</p>
                 </div>
-              )}
-            </div>
+                <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+                  {stripePaymentsLoading ? (
+                    <div className="p-8 text-center"><div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" /></div>
+                  ) : stripePayments.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+                      <CreditCard className="w-8 h-8 text-muted-foreground/30" />
+                      No Stripe payments yet
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {stripePayments.map((tx) => (
+                        <div key={tx.id} className="p-4 flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="font-medium text-foreground text-sm">{tx.userName ?? `User #${tx.userId}`}</span>
+                              {tx.userEmail && <span className="text-xs text-muted-foreground">({tx.userEmail})</span>}
+                              <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                                tx.userStatus === "active" ? "bg-accent/10 text-accent" :
+                                tx.userStatus === "pending" ? "bg-yellow-500/10 text-yellow-500" :
+                                "bg-secondary text-muted-foreground"
+                              )}>{tx.userStatus ?? "—"}</span>
+                              {/* KYC badge */}
+                              {tx.isKycVerified ? (
+                                <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20 font-medium">
+                                  <ShieldCheck className="w-3 h-3" /> KYC ✓
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 font-medium">
+                                  <ShieldAlert className="w-3 h-3" /> KYC Pending
+                                </span>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-muted-foreground">
+                              <span>Amount: <span className="text-foreground font-semibold">${tx.amount?.toFixed(2) ?? "—"} {tx.currency?.toUpperCase()}</span></span>
+                              <span>Status: <span className={cn("font-medium", tx.status === "confirmed" ? "text-accent" : "text-yellow-500")}>{tx.status}</span></span>
+                              <span className="col-span-2 font-mono truncate">Session: {tx.txHash}</span>
+                              <span>Paid: {tx.confirmedAt ? new Date(tx.confirmedAt).toLocaleString() : "—"}</span>
+                              <span>Submitted: {new Date(tx.createdAt).toLocaleString()}</span>
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-2 shrink-0">
+                            <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => fetchUserProfile(tx.userId)}>
+                              <Eye className="w-3 h-3 mr-1" /> Profile
+                            </Button>
+                            {!tx.isKycVerified && (
+                              <Button size="sm" className="h-8 px-2 text-xs" onClick={() => handleApproveKyc(tx.userId)} disabled={kycPending === tx.userId}>
+                                <ShieldCheck className="w-3 h-3 mr-1" /> Approve KYC
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Manual Submissions sub-tab ── */}
+            {paymentsSubTab === "manual" && (
+              <div className="space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">Manual Payment Submissions</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Review and approve manual (USDT transfer / cash) payment submissions</p>
+                </div>
+                <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+                  {submissionsLoading ? (
+                    <div className="p-8 text-center"><div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" /></div>
+                  ) : submissions.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-muted-foreground">No payment submissions yet</div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {submissions.map((s) => (
+                        <div key={s.id} className="p-5">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-foreground text-sm">User #{s.userId}</span>
+                                <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                                  s.paymentMethod === "manual_usdt" ? "bg-primary/10 text-primary" : "bg-accent/10 text-accent"
+                                )}>
+                                  {s.paymentMethod === "manual_usdt" ? "USDT Transfer" : "Cash in Hand"}
+                                </span>
+                                <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                                  s.status === "pending" ? "bg-yellow-500/10 text-yellow-500" :
+                                  s.status === "approved" ? "bg-accent/10 text-accent" : "bg-destructive/10 text-destructive"
+                                )}>{s.status}</span>
+                              </div>
+                              <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                                {s.paymentMethod === "manual_usdt" ? (
+                                  <>
+                                    <span>Wallet: <span className="text-foreground font-mono">{s.senderWalletAddress ?? "—"}</span></span>
+                                    <span>Network: <span className="text-foreground">{s.blockchainNetwork ?? "—"}</span></span>
+                                    <span>Amount: <span className="text-foreground font-semibold">{s.transferredAmount ? `$${parseFloat(s.transferredAmount).toFixed(2)}` : "—"}</span></span>
+                                    <span>Date: <span className="text-foreground">{s.paymentDateTime ? new Date(s.paymentDateTime).toLocaleString() : "—"}</span></span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>Ref: <span className="text-foreground font-mono">{s.paymentReferenceNumber ?? "—"}</span></span>
+                                    <span>Collector: <span className="text-foreground">{s.collectorName ?? "—"} (ID: {s.collectorId ?? "—"})</span></span>
+                                    <span>Date: <span className="text-foreground">{s.paymentDate ? new Date(s.paymentDate).toLocaleDateString() : "—"}</span></span>
+                                    {s.remarks && <span className="col-span-2">Remarks: <span className="text-foreground">{s.remarks}</span></span>}
+                                  </>
+                                )}
+                                {s.paymentScreenshotUrl && (
+                                  <a href={s.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline col-span-2">📎 View Screenshot</a>
+                                )}
+                                <span className="text-muted-foreground/60">Submitted: {new Date(s.createdAt).toLocaleString()}</span>
+                              </div>
+                              {s.rejectionReason && (
+                                <p className="mt-2 text-xs text-destructive bg-destructive/5 px-2 py-1 rounded">Rejected: {s.rejectionReason}</p>
+                              )}
+                            </div>
+                            {s.status === "pending" && (
+                              <div className="flex flex-col gap-2 shrink-0">
+                                <Button size="sm" className="h-8 px-3 text-xs" onClick={() => handleSubmissionAction(s.id, "approve")} disabled={actionPending === s.id}>
+                                  <CheckCircle className="w-3 h-3 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" className="h-8 px-3 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                                  onClick={() => { const reason = prompt("Rejection reason:"); if (reason !== null) handleSubmissionAction(s.id, "reject", reason); }}
+                                  disabled={actionPending === s.id}
+                                >
+                                  <Ban className="w-3 h-3 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* OVERVIEW TAB */}
+
         {activeTab === "Overview" && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -709,6 +927,7 @@ export default function AdminPage() {
                   <tr className="border-b border-border bg-secondary/30">
                     <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Member</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">KYC</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Package</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Joined</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Actions</th>
@@ -718,7 +937,7 @@ export default function AdminPage() {
                   {usersLoading ? (
                     Array.from({ length: 5 }).map((_, i) => (
                       <tr key={i}>
-                        <td colSpan={5} className="px-4 py-3">
+                        <td colSpan={6} className="px-4 py-3">
                           <div className="h-4 bg-secondary rounded animate-pulse w-full" />
                         </td>
                       </tr>
@@ -753,6 +972,18 @@ export default function AdminPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
+                        {/* KYC status */}
+                        {(u as any).isKycVerified ? (
+                          <span className="flex items-center gap-1 text-xs text-accent font-medium">
+                            <ShieldCheck className="w-3.5 h-3.5" /> Verified
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs text-yellow-500 font-medium">
+                            <ShieldAlert className="w-3.5 h-3.5" /> Pending
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
                         <span className="text-xs text-muted-foreground capitalize">{u.packageType ?? "—"}</span>
                       </td>
                       <td className="px-4 py-3">
@@ -779,7 +1010,7 @@ export default function AdminPage() {
                                 disabled={approvePayment.isPending}
                                 data-testid={`button-approve-${u.id}`}
                               >
-                                <UserCheck className="w-3 h-3 mr-1" /> Approve
+                                <UserCheck className="w-3 h-3 mr-1" /> Approve KYC
                               </Button>
                             </>
                           )}
@@ -1285,13 +1516,158 @@ export default function AdminPage() {
                   disabled={approvePayment.isPending}
                   className="bg-accent hover:bg-accent/90 h-9"
                 >
-                  <UserCheck className="w-4 h-4 mr-1.5" /> Approve & Activate Distributor
+                  <UserCheck className="w-4 h-4 mr-1.5" /> Approve KYC
                 </Button>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── User Profile Modal ── */}
+      <Dialog open={!!profileUser || profileLoading} onOpenChange={(open) => { if (!open) setProfileUser(null); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <User className="w-4 h-4 text-primary" /> Member Profile
+            </DialogTitle>
+            <DialogDescription>Full profile details for this member</DialogDescription>
+          </DialogHeader>
+
+          {profileLoading && (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+            </div>
+          )}
+
+          {profileUser && !profileLoading && (
+            <div className="space-y-5">
+              {/* Header card */}
+              <div className="flex items-start gap-4 p-4 bg-secondary/20 rounded-xl">
+                <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center text-xl font-bold text-primary flex-shrink-0">
+                  {profileUser.firstName?.charAt(0)}{profileUser.lastName?.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-foreground">{profileUser.firstName} {profileUser.lastName}</h3>
+                    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                      profileUser.status === "active" ? "bg-accent/20 text-accent" :
+                      profileUser.status === "pending" ? "bg-yellow-500/20 text-yellow-500" :
+                      "bg-destructive/20 text-destructive"
+                    )}>{profileUser.status}</span>
+                    {profileUser.isKycVerified ? (
+                      <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20 font-medium">
+                        <ShieldCheck className="w-3 h-3" /> KYC Verified
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 font-medium">
+                        <ShieldAlert className="w-3 h-3" /> KYC Pending
+                      </span>
+                    )}
+                    {profileUser.role === "admin" && (
+                      <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded font-medium">Admin</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-0.5">{profileUser.email}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Wallet ID: <span className="font-mono text-foreground">{profileUser.walletId ?? "—"}</span>
+                    &ensp;·&ensp; Referral: <span className="font-mono text-foreground">{profileUser.referralCode}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Grid of details */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Personal */}
+                <div className="bg-card border border-card-border rounded-xl p-4 space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Personal Info</p>
+                  {[
+                    ["Username", profileUser.username],
+                    ["Mobile", profileUser.mobileNumber],
+                    ["DOB", profileUser.dob],
+                    ["Gender", profileUser.gender],
+                    ["Country", profileUser.countryCode],
+                    ["State/City", [profileUser.state, profileUser.city].filter(Boolean).join(", ") || null],
+                    ["Address", profileUser.address],
+                  ].map(([label, val]) => val && (
+                    <div key={label as string} className="flex justify-between gap-2 text-xs">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className="text-foreground font-medium text-right truncate max-w-[150px]">{val}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Financial */}
+                <div className="bg-card border border-card-border rounded-xl p-4 space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Financial & Network</p>
+                  {[
+                    ["Package", profileUser.packageType],
+                    ["Wallet Balance", profileUser.walletBalance != null ? `$${profileUser.walletBalance.toFixed(2)}` : null],
+                    ["Total Earned", profileUser.totalEarned != null ? `$${profileUser.totalEarned.toFixed(2)}` : null],
+                    ["Left BV", profileUser.leftBv != null ? `${profileUser.leftBv.toFixed(0)} BV` : null],
+                    ["Right BV", profileUser.rightBv != null ? `${profileUser.rightBv.toFixed(0)} BV` : null],
+                    ["Network Leg", profileUser.networkLeg],
+                    ["Depth", profileUser.networkDepth != null ? `Level ${profileUser.networkDepth}` : null],
+                    ["Downline", profileUser.downlineCount != null ? `${profileUser.downlineCount} members` : null],
+                  ].map(([label, val]) => val && (
+                    <div key={label as string} className="flex justify-between gap-2 text-xs">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className="text-foreground font-medium">{val}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Sponsor info */}
+                {profileUser.sponsor && (
+                  <div className="col-span-2 bg-card border border-card-border rounded-xl p-4">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Sponsor / Referrer</p>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-accent/20 flex items-center justify-center text-sm font-bold text-accent">
+                        {profileUser.sponsor.firstName?.charAt(0)}{profileUser.sponsor.lastName?.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{profileUser.sponsor.firstName} {profileUser.sponsor.lastName}</p>
+                        <p className="text-xs text-muted-foreground">{profileUser.sponsor.email}</p>
+                        <p className="text-xs font-mono text-muted-foreground">Referral: {profileUser.sponsor.referralCode}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* USDT Address */}
+                {profileUser.usdtAddress && (
+                  <div className="col-span-2 bg-card border border-card-border rounded-xl p-4">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">USDT Address</p>
+                    <p className="text-xs font-mono text-foreground break-all">{profileUser.usdtAddress}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* KYC action */}
+              {!profileUser.isKycVerified && (
+                <div className="flex gap-3 pt-2 border-t border-border">
+                  <Button
+                    onClick={() => { handleApproveKyc(profileUser.id); setProfileUser(null); }}
+                    disabled={kycPending === profileUser.id}
+                    className="h-9"
+                  >
+                    <ShieldCheck className="w-4 h-4 mr-1.5" /> Approve KYC Verification
+                  </Button>
+                  <Button variant="outline" onClick={() => setProfileUser(null)} className="h-9">
+                    <X className="w-4 h-4 mr-1.5" /> Close
+                  </Button>
+                </div>
+              )}
+              {profileUser.isKycVerified && (
+                <div className="flex justify-end pt-2 border-t border-border">
+                  <Button variant="outline" onClick={() => setProfileUser(null)} className="h-9">Close</Button>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Layout>
+
   );
 }

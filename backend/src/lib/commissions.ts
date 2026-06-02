@@ -1,4 +1,4 @@
-import { db, usersTable, networkNodesTable, commissionsTable, walletsTable, walletTransactionsTable, activityFeedTable, financialLedgerTable } from "@workspace/db";
+import { db, usersTable, networkNodesTable, commissionsTable, walletsTable, walletTransactionsTable, activityFeedTable, financialLedgerTable } from "../db";
 import { eq, and } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -61,26 +61,11 @@ export async function checkAndAwardBinaryCycles(userId: number): Promise<void> {
 
   if (!user || user.status !== "active") return;
 
-  const totalLeftBv = parseFloat(node.leftBv ?? "0");
-  const totalRightBv = parseFloat(node.rightBv ?? "0");
+  const unmatchedLeft = parseFloat(user.residualLeftBv ?? "0");
+  const unmatchedRight = parseFloat(user.residualRightBv ?? "0");
 
-  // Both sides must have BV for a match to be possible
-  if (totalLeftBv < BINARY_CYCLE_THRESHOLD || totalRightBv < BINARY_CYCLE_THRESHOLD) return;
-
-  // Count already-paid cycles to avoid double-paying
-  const paidCommissions = await db
-    .select()
-    .from(commissionsTable)
-    .where(and(eq(commissionsTable.userId, userId), eq(commissionsTable.type, "binary_match")));
-
-  const paidCycles = paidCommissions.reduce((sum, c) => {
-    return sum + (c.bvMatched ? Math.floor(parseFloat(c.bvMatched) / BINARY_CYCLE_THRESHOLD) : 1);
-  }, 0);
-
-  // Unmatched BV = total accumulated - already consumed by past cycles
-  const consumedBv = paidCycles * BINARY_CYCLE_THRESHOLD;
-  const unmatchedLeft = Math.max(0, totalLeftBv - consumedBv);
-  const unmatchedRight = Math.max(0, totalRightBv - consumedBv);
+  // Both sides must have at least BINARY_CYCLE_THRESHOLD BV for a match
+  if (unmatchedLeft < BINARY_CYCLE_THRESHOLD || unmatchedRight < BINARY_CYCLE_THRESHOLD) return;
 
   // A new cycle fires only when BOTH sides have >= 3,000 BV unmatched
   const newCycles = Math.floor(Math.min(unmatchedLeft, unmatchedRight) / BINARY_CYCLE_THRESHOLD);
@@ -88,6 +73,18 @@ export async function checkAndAwardBinaryCycles(userId: number): Promise<void> {
 
   const bonusAmount = newCycles * BINARY_CYCLE_BONUS;
   const matchedBv = newCycles * BINARY_CYCLE_THRESHOLD;
+
+  // Update residual BV for the user
+  const newResidualLeft = unmatchedLeft - matchedBv;
+  const newResidualRight = unmatchedRight - matchedBv;
+
+  await db
+    .update(usersTable)
+    .set({
+      residualLeftBv: String(newResidualLeft),
+      residualRightBv: String(newResidualRight)
+    })
+    .where(eq(usersTable.id, userId));
 
   await db.insert(commissionsTable).values({
     userId,

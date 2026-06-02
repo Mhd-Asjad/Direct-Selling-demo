@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcrypt";
-import { db, coursesTable, usersTable, networkNodesTable, walletsTable, couponsTable, activityFeedTable, financialLedgerTable } from "@workspace/db";
+import { db, coursesTable, usersTable, networkNodesTable, walletsTable, couponsTable, activityFeedTable, financialLedgerTable } from "../db";
 import { eq } from "drizzle-orm";
-import { PurchaseCourseBody } from "@workspace/api-zod";
+import { PurchaseCourseBody } from "../api-zod";
 import { propagateBv, getAncestorUserIds } from "../lib/bfs";
 import { awardDirectReferralCommission, checkAndAwardBinaryCycles, debitWallet } from "../lib/commissions";
 

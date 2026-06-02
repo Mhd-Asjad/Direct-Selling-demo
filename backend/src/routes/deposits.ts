@@ -8,7 +8,7 @@ import {
   financialLedgerTable,
   activityFeedTable,
   manualDepositRequestsTable,
-} from "@workspace/db";
+} from "../db";
 import { eq, and, desc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { activateUser } from "../lib/activation";
@@ -183,24 +183,8 @@ router.post("/admin/deposits/:id/approve", async (req, res): Promise<void> => {
       { userId, code: code2, amount: "50000", couponType: "activation", status: "active", generatedBy: `admin:${sessionUserId}` },
     ]);
 
-    // 2. Credit user wallet balance (amount in USDT → record as credit)
-    let [wallet] = await db.select().from(walletsTable).where(eq(walletsTable.userId, userId));
-    if (!wallet) {
-      [wallet] = await db.insert(walletsTable).values({ userId, totalEarned: "0", totalSpent: "0", availableBalance: "0" }).returning();
-    }
+    // 2. We NO LONGER credit direct money. They receive the coupons to use for course purchase or redeem to USDT.
     const usdtAmount = parseFloat(deposit.amountInUSDT);
-    const newBalance = parseFloat(wallet.availableBalance ?? "0") + usdtAmount;
-    const newEarned = parseFloat(wallet.totalEarned ?? "0") + usdtAmount;
-    await db.update(walletsTable).set({ availableBalance: String(newBalance), totalEarned: String(newEarned) }).where(eq(walletsTable.id, wallet.id));
-
-    // 3. Log immutable wallet transaction record
-    await db.insert(walletTransactionsTable).values({
-      walletId: wallet.id,
-      type: "credit",
-      amount: String(usdtAmount),
-      description: `Manual USDT deposit approved — (${deposit.blockchainNetwork})`,
-      referenceId: `deposit:${depositId}`,
-    });
 
     // 4. Log financial ledger inflow
     await db.insert(financialLedgerTable).values({

@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, networkNodesTable, commissionsTable, walletsTable, activityFeedTable } from "@workspace/db";
+import { db, usersTable, networkNodesTable, commissionsTable, walletsTable, activityFeedTable } from "../db";
 import { eq } from "drizzle-orm";
+import { appCache } from "../lib/cache";
 
 const router: IRouter = Router();
 
@@ -10,6 +11,14 @@ router.get("/dashboard/summary", async (req, res): Promise<void> => {
   const userId = (req.session as any).userId;
   if (!userId) {
     res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  // Check cache first
+  const cacheKey = `dashboard:summary:${userId}`;
+  const cachedData = appCache.get(cacheKey);
+  if (cachedData) {
+    res.json(cachedData);
     return;
   }
 
@@ -59,8 +68,8 @@ router.get("/dashboard/summary", async (req, res): Promise<void> => {
   const residualLeft = parseFloat(user.residualLeftBv ?? "0");
   const residualRight = parseFloat(user.residualRightBv ?? "0");
 
-  const effectiveLeft = leftBv + residualLeft;
-  const effectiveRight = rightBv + residualRight;
+  const effectiveLeft = residualLeft;
+  const effectiveRight = residualRight;
   const pendingCycles = Math.floor(Math.min(effectiveLeft, effectiveRight) / BINARY_CYCLE_THRESHOLD);
 
   const nextCycleLeftNeeded = Math.max(0, BINARY_CYCLE_THRESHOLD - (effectiveLeft % BINARY_CYCLE_THRESHOLD));
@@ -69,10 +78,10 @@ router.get("/dashboard/summary", async (req, res): Promise<void> => {
   const totalEarned = commissions.reduce((sum, c) => sum + parseFloat(c.amount), 0);
   const walletBalance = parseFloat(wallet?.availableBalance ?? "0");
 
-  res.json({
+  const summaryData = {
     userId,
-    leftBv,
-    rightBv,
+    leftBv: effectiveLeft,
+    rightBv: effectiveRight,
     directReferrals,
     totalDownline,
     walletBalance,
@@ -80,13 +89,23 @@ router.get("/dashboard/summary", async (req, res): Promise<void> => {
     pendingCycles,
     nextCycleLeftNeeded,
     nextCycleRightNeeded,
-  });
+  };
+
+  appCache.set(cacheKey, summaryData, 5 * 60 * 1000); // 5 mins cache
+  res.json(summaryData);
 });
 
 router.get("/dashboard/activity", async (req, res): Promise<void> => {
   const userId = (req.session as any).userId;
   if (!userId) {
     res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const cacheKey = `dashboard:activity:${userId}`;
+  const cachedData = appCache.get(cacheKey);
+  if (cachedData) {
+    res.json(cachedData);
     return;
   }
 
@@ -98,23 +117,24 @@ router.get("/dashboard/activity", async (req, res): Promise<void> => {
   const allUsers = await db.select().from(usersTable);
   const userMap = new Map(allUsers.map((u) => [u.id, u]));
 
-  res.json(
-    activities
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, 20)
-      .map((a) => {
-        const related = a.relatedUserId ? userMap.get(a.relatedUserId) : null;
-        return {
-          id: a.id,
-          type: a.type,
-          message: a.message,
-          amount: a.amount ? parseFloat(a.amount) : null,
-          relatedUserId: a.relatedUserId ?? null,
-          relatedUserName: related ? `${related.firstName} ${related.lastName}` : null,
-          createdAt: a.createdAt.toISOString(),
-        };
-      }),
-  );
+  const responseData = activities
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 20)
+    .map((a) => {
+      const related = a.relatedUserId ? userMap.get(a.relatedUserId) : null;
+      return {
+        id: a.id,
+        type: a.type,
+        message: a.message,
+        amount: a.amount ? parseFloat(a.amount) : null,
+        relatedUserId: a.relatedUserId ?? null,
+        relatedUserName: related ? `${related.firstName} ${related.lastName}` : null,
+        createdAt: a.createdAt.toISOString(),
+      };
+    });
+
+  appCache.set(cacheKey, responseData, 60 * 1000); // 1 minute cache
+  res.json(responseData);
 });
 
 export default router;

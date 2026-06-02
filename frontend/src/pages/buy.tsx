@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearch, useLocation } from "wouter";
-import { useGetCourseReferral, getGetCourseReferralQueryKey, usePurchaseCourse } from "@workspace/api-client-react";
+import { useGetCourseReferral, getGetCourseReferralQueryKey, usePurchaseCourse } from "@/api-client";
 import { BookOpen, ShieldCheck, Zap, CheckCircle, AlertTriangle, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
