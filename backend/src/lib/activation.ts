@@ -1,4 +1,4 @@
-import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable, financialLedgerTable } from "@workspace/db";
+import { db, usersTable, networkNodesTable, walletsTable, activityFeedTable, financialLedgerTable } from "../db";
 import { eq } from "drizzle-orm";
 import { bfsPlacement, propagateBv } from "./bfs";
 import { awardDirectReferralCommission, checkAndAwardBinaryCycles } from "./commissions";
@@ -10,7 +10,7 @@ const BV_PER_REGISTRATION = 30;
  * Activates a pending user, places them into the binary MLM tree,
  * processes BV propagation, distributes sponsor commissions, and updates E-Wallet/financial feeds.
  */
-export async function activateUser(userId: number, bvAmount: number = BV_PER_REGISTRATION) {
+export async function activateUser(userId: number, bvAmount: number = BV_PER_REGISTRATION, commissionBaseAmount: number = bvAmount) {
   const [user] = await db
     .select()
     .from(usersTable)
@@ -46,67 +46,75 @@ export async function activateUser(userId: number, bvAmount: number = BV_PER_REG
     });
   }
 
-  // 3. Perform BFS binary tree placement
-  let parentNodeId: number | null = null;
-  let placementLeg: "left" | "right" = "left";
+  // 3. Check if user already exists in network tree
+  const [existingNode] = await db
+    .select()
+    .from(networkNodesTable)
+    .where(eq(networkNodesTable.userId, user.id));
 
-  if (user.sponsorId) {
-    const [sponsorNode] = await db
-      .select()
-      .from(networkNodesTable)
-      .where(eq(networkNodesTable.userId, user.sponsorId));
+  if (!existingNode) {
+    // 4. Perform BFS binary tree placement
+    let parentNodeId: number | null = null;
+    let placementLeg: "left" | "right" = "left";
 
-    if (sponsorNode) {
-      const preferredLeg = (user.placementSide === "left" || user.placementSide === "right")
-        ? user.placementSide
-        : "left";
-      const placement = await bfsPlacement(sponsorNode.id, preferredLeg);
-      if (placement) {
-        parentNodeId = placement.parentId;
-        placementLeg = placement.leg;
+    if (user.sponsorId) {
+      const [sponsorNode] = await db
+        .select()
+        .from(networkNodesTable)
+        .where(eq(networkNodesTable.userId, user.sponsorId));
+
+      if (sponsorNode) {
+        const preferredLeg = (user.placementSide === "left" || user.placementSide === "right")
+          ? user.placementSide
+          : "left";
+        const placement = await bfsPlacement(sponsorNode.id, preferredLeg);
+        if (placement) {
+          parentNodeId = placement.parentId;
+          placementLeg = placement.leg;
+        }
       }
     }
-  }
 
-  // 4. Calculate depth of parent node
-  let depth = 0;
-  if (parentNodeId) {
-    const [parentNode] = await db
-      .select()
-      .from(networkNodesTable)
-      .where(eq(networkNodesTable.id, parentNodeId));
-    if (parentNode) depth = (parentNode.depth ?? 0) + 1;
-  }
-
-  // 5. Create new node in the network tree
-  const [newNode] = await db
-    .insert(networkNodesTable)
-    .values({
-      userId: user.id,
-      parentId: parentNodeId,
-      sponsorId: user.sponsorId,
-      leg: placementLeg,
-      depth,
-    })
-    .returning();
-
-  // 6. Update parent node child links
-  if (parentNodeId) {
-    if (placementLeg === "left") {
-      await db
-        .update(networkNodesTable)
-        .set({ leftChildId: newNode.id })
+    // 5. Calculate depth of parent node
+    let depth = 0;
+    if (parentNodeId) {
+      const [parentNode] = await db
+        .select()
+        .from(networkNodesTable)
         .where(eq(networkNodesTable.id, parentNodeId));
-    } else {
-      await db
-        .update(networkNodesTable)
-        .set({ rightChildId: newNode.id })
-        .where(eq(networkNodesTable.id, parentNodeId));
+      if (parentNode) depth = (parentNode.depth ?? 0) + 1;
     }
-  }
 
-  // 7. Propagate BV upwards through sponsor path
-  await propagateBv(newNode.id, bvAmount);
+    // 6. Create new node in the network tree
+    const [newNode] = await db
+      .insert(networkNodesTable)
+      .values({
+        userId: user.id,
+        parentId: parentNodeId,
+        sponsorId: user.sponsorId,
+        leg: placementLeg,
+        depth,
+      })
+      .returning();
+
+    // 7. Update parent node child links
+    if (parentNodeId) {
+      if (placementLeg === "left") {
+        await db
+          .update(networkNodesTable)
+          .set({ leftChildId: newNode.id })
+          .where(eq(networkNodesTable.id, parentNodeId));
+      } else {
+        await db
+          .update(networkNodesTable)
+          .set({ rightChildId: newNode.id })
+          .where(eq(networkNodesTable.id, parentNodeId));
+      }
+    }
+
+    // 8. Propagate BV upwards through sponsor path
+    await propagateBv(newNode.id, bvAmount);
+  }
 
   // 8. Log financial ledger inflow if it hasn't been logged yet (e.g. if paid via bank/cash manually rather than Stripe)
   if (!user.isPaid) {
@@ -120,7 +128,7 @@ export async function activateUser(userId: number, bvAmount: number = BV_PER_REG
 
   // 9. Award direct referral commission (10%) to the sponsor and check binary cycles
   if (user.sponsorId) {
-    await awardDirectReferralCommission(user.id, user.sponsorId, REGISTRATION_FEE);
+    await awardDirectReferralCommission(user.id, user.sponsorId, commissionBaseAmount);
     await checkAndAwardBinaryCycles(user.sponsorId);
   }
 

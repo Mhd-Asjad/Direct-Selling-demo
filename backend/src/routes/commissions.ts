@@ -1,7 +1,9 @@
 import { Router, type IRouter } from "express";
-import { db, commissionsTable, usersTable, networkNodesTable } from "@workspace/db";
+import { db, commissionsTable, usersTable, networkNodesTable } from "../db";
 import { eq } from "drizzle-orm";
-import { ListCommissionsQueryParams, GetCommissionStatsQueryParams } from "@workspace/api-zod";
+import { ListCommissionsQueryParams, GetCommissionStatsQueryParams } from "../api-zod";
+
+import { appCache } from "../lib/cache";
 
 const router: IRouter = Router();
 
@@ -17,6 +19,13 @@ router.get("/commissions", async (req, res): Promise<void> => {
     return;
   }
 
+  const cacheKey = `commissions:${userId}:${params.success ? params.data.type || 'all' : 'all'}`;
+  const cachedData = appCache.get(cacheKey);
+  if (cachedData) {
+    res.json(cachedData);
+    return;
+  }
+
   let allCommissions = await db
     .select()
     .from(commissionsTable)
@@ -28,7 +37,10 @@ router.get("/commissions", async (req, res): Promise<void> => {
 
   // Enrich with source user names
   const userIds = [...new Set(allCommissions.map((c) => c.sourceUserId))];
-  const users = await db.select().from(usersTable);
+  let users: any[] = [];
+  if (userIds.length > 0) {
+    users = await db.select().from(usersTable); // Note: Could be optimized with `inArray` if needed
+  }
   const userMap = new Map(users.map((u) => [u.id, u]));
 
   const enriched = allCommissions
@@ -49,6 +61,7 @@ router.get("/commissions", async (req, res): Promise<void> => {
       };
     });
 
+  appCache.set(cacheKey, enriched, 60 * 1000); // 1 minute cache
   res.json(enriched);
 });
 
@@ -58,6 +71,13 @@ router.get("/commissions/stats", async (req, res): Promise<void> => {
   const userId = (params.success && params.data.userId) ? params.data.userId : sessionUserId;
   if (!userId) {
     res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const cacheKey = `commissions:stats:${userId}`;
+  const cachedData = appCache.get(cacheKey);
+  if (cachedData) {
+    res.json(cachedData);
     return;
   }
 
@@ -87,7 +107,7 @@ router.get("/commissions/stats", async (req, res): Promise<void> => {
   const matchedBv = Math.min(effectiveLeft, effectiveRight);
   const pendingCycles = Math.floor(matchedBv / BINARY_CYCLE_THRESHOLD);
 
-  res.json({
+  const responseData = {
     totalEarned,
     directReferralTotal,
     binaryMatchTotal,
@@ -97,7 +117,10 @@ router.get("/commissions/stats", async (req, res): Promise<void> => {
     matchedBv,
     residualLeftBv: residualLeft,
     residualRightBv: residualRight,
-  });
+  };
+
+  appCache.set(cacheKey, responseData, 5 * 60 * 1000); // 5 minutes cache
+  res.json(responseData);
 });
 
 export default router;

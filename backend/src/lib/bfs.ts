@@ -1,4 +1,4 @@
-import { db, networkNodesTable } from "@workspace/db";
+import { db, networkNodesTable, usersTable } from "../db";
 import { eq } from "drizzle-orm";
 
 /**
@@ -63,16 +63,42 @@ export async function propagateBv(
       .where(eq(networkNodesTable.id, currentId));
     if (!current) break;
 
+    // We also need the user record to update total and residual BV
+    const [user] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, current.userId));
+
     if (current.leftChildId === childId) {
       await db
         .update(networkNodesTable)
         .set({ leftBv: String(parseFloat(current.leftBv ?? "0") + bvAmount) })
         .where(eq(networkNodesTable.id, currentId));
+
+      if (user) {
+        await db
+          .update(usersTable)
+          .set({ 
+            leftBv: String(parseFloat(user.leftBv ?? "0") + bvAmount),
+            residualLeftBv: String(parseFloat(user.residualLeftBv ?? "0") + bvAmount)
+          })
+          .where(eq(usersTable.id, user.id));
+      }
     } else if (current.rightChildId === childId) {
       await db
         .update(networkNodesTable)
         .set({ rightBv: String(parseFloat(current.rightBv ?? "0") + bvAmount) })
         .where(eq(networkNodesTable.id, currentId));
+
+      if (user) {
+        await db
+          .update(usersTable)
+          .set({ 
+            rightBv: String(parseFloat(user.rightBv ?? "0") + bvAmount),
+            residualRightBv: String(parseFloat(user.residualRightBv ?? "0") + bvAmount)
+          })
+          .where(eq(usersTable.id, user.id));
+      }
     }
 
     childId = currentId;

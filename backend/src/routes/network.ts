@@ -1,16 +1,29 @@
 import { Router, type IRouter } from "express";
-import { db, networkNodesTable, usersTable } from "@workspace/db";
+import { db, networkNodesTable, usersTable } from "../db";
 import { eq } from "drizzle-orm";
-import { GetNetworkTreeQueryParams, GetUserTreeParams, PlaceNodeBody } from "@workspace/api-zod";
+import { GetNetworkTreeQueryParams, GetUserTreeParams, PlaceNodeBody } from "../api-zod";
 import { propagateBv } from "../lib/bfs";
+
+import { appCache } from "../lib/cache";
 
 const router: IRouter = Router();
 
 async function buildTreeNodes(nodeIds: number[]): Promise<any[]> {
   if (nodeIds.length === 0) return [];
 
-  const nodes = await db.select().from(networkNodesTable);
-  const users = await db.select().from(usersTable);
+  const cacheKey = `network:nodes_users`;
+  let cachedDb = appCache.get<{nodes: any[], users: any[]}>(cacheKey);
+  
+  let nodes, users;
+  if (cachedDb) {
+    nodes = cachedDb.nodes;
+    users = cachedDb.users;
+  } else {
+    nodes = await db.select().from(networkNodesTable);
+    users = await db.select().from(usersTable);
+    appCache.set(cacheKey, { nodes, users }, 30 * 1000); // 30 sec cache
+  }
+
   const userMap = new Map(users.map((u) => [u.id, u]));
 
   return nodes
@@ -37,7 +50,18 @@ async function buildTreeNodes(nodeIds: number[]): Promise<any[]> {
 }
 
 async function getAllDescendantIds(rootNodeId: number): Promise<number[]> {
-  const allNodes = await db.select().from(networkNodesTable);
+  const cacheKey = `network:nodes_users`;
+  let cachedDb = appCache.get<{nodes: any[], users: any[]}>(cacheKey);
+  let allNodes;
+  
+  if (cachedDb) {
+    allNodes = cachedDb.nodes;
+  } else {
+    allNodes = await db.select().from(networkNodesTable);
+    const users = await db.select().from(usersTable);
+    appCache.set(cacheKey, { nodes: allNodes, users }, 30 * 1000);
+  }
+
   const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
 
   const result: number[] = [];
@@ -58,6 +82,13 @@ async function getAllDescendantIds(rootNodeId: number): Promise<number[]> {
 router.get("/network/tree", async (req, res): Promise<void> => {
   const params = GetNetworkTreeQueryParams.safeParse(req.query);
 
+  const cacheKey = `network:tree:${params.data?.rootUserId ?? 'admin'}`;
+  const cachedTree = appCache.get(cacheKey);
+  if (cachedTree) {
+    res.json(cachedTree);
+    return;
+  }
+
   if (params.success && params.data.rootUserId) {
     // Subtree for specific user
     const [rootNode] = await db
@@ -72,6 +103,7 @@ router.get("/network/tree", async (req, res): Promise<void> => {
 
     const ids = await getAllDescendantIds(rootNode.id);
     const result = await buildTreeNodes(ids);
+    appCache.set(cacheKey, result, 30 * 1000);
     res.json(result);
     return;
   }
@@ -80,6 +112,7 @@ router.get("/network/tree", async (req, res): Promise<void> => {
   const allNodes = await db.select().from(networkNodesTable);
   const ids = allNodes.map((n) => n.id);
   const result = await buildTreeNodes(ids);
+  appCache.set(cacheKey, result, 30 * 1000);
   res.json(result);
 });
 
@@ -87,6 +120,13 @@ router.get("/network/tree/:userId", async (req, res): Promise<void> => {
   const params = GetUserTreeParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid user ID" });
+    return;
+  }
+
+  const cacheKey = `network:tree:${params.data.userId}`;
+  const cachedTree = appCache.get(cacheKey);
+  if (cachedTree) {
+    res.json(cachedTree);
     return;
   }
 
@@ -102,6 +142,7 @@ router.get("/network/tree/:userId", async (req, res): Promise<void> => {
 
   const ids = await getAllDescendantIds(rootNode.id);
   const result = await buildTreeNodes(ids);
+  appCache.set(cacheKey, result, 30 * 1000);
   res.json(result);
 });
 

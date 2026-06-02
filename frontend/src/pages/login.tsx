@@ -1,7 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useLoginUser, getGetCurrentUserQueryKey } from "@workspace/api-client-react";
+import { useLoginUser, getGetCurrentUserQueryKey } from "@/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, Link } from "wouter";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";

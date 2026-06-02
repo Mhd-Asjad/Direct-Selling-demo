@@ -5,11 +5,12 @@ import {
   useGetRecentActivity, getGetRecentActivityQueryKey,
   useGetCommissionStats, getGetCommissionStatsQueryKey,
   useStripeCreateCheckoutSession, useStripeVerifyCheckoutSession, getGetCurrentUserQueryKey
-} from "@workspace/api-client-react";
+} from "@/api-client";
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/lib/api-fetch";
 import {
   TrendingUp, Users, Wallet, DollarSign,
   Activity, ArrowUpRight, Clock, CheckCircle,
@@ -107,24 +108,24 @@ export default function DashboardPage() {
 
   const fetchPlatformDetails = async () => {
     try {
-      const res = await fetch("/api/deposits/platform-address");
+      const res = await apiFetch("/api/deposits/platform-address");
       if (res.ok) {
         const data = await res.json();
         setPlatformUsdtAddress(data.address);
       }
-    } catch {}
+    } catch { }
   };
 
   const fetchMyDeposits = async () => {
     try {
-      const res = await fetch("/api/deposits/my-requests");
+      const res = await apiFetch("/api/deposits/my-requests");
       if (res.ok) setMyDeposits(await res.json());
-    } catch {}
+    } catch { }
   };
 
   const submitManualDeposit = useMutation({
     mutationFn: async (data: typeof depositForm) => {
-      const res = await fetch("/api/deposits/manual", {
+      const res = await apiFetch("/api/deposits/manual", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...data, amountInUSDT: parseFloat(data.amountInUSDT) }),
@@ -147,7 +148,7 @@ export default function DashboardPage() {
 
   const createCourseCheckoutSession = useMutation({
     mutationFn: async (userId: number) => {
-      const res = await fetch("/api/auth/create-course-checkout-session", {
+      const res = await apiFetch("/api/auth/create-course-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),
@@ -163,7 +164,7 @@ export default function DashboardPage() {
 
   const redeemCoupons = useMutation({
     mutationFn: async (data: { userId: number, coupon1: string, coupon2: string }) => {
-      const res = await fetch("/api/auth/redeem-activation-coupons", {
+      const res = await apiFetch("/api/auth/redeem-activation-coupons", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -196,13 +197,15 @@ export default function DashboardPage() {
     { query: { queryKey: getGetCommissionStatsQueryKey({}), enabled: !!user && user.status !== "pending" } },
   );
 
-  // Load user's deposit requests when pending
+  // Load user's deposit requests
   useEffect(() => {
-    if (user?.status === "pending") {
+    if (user) {
       fetchMyDeposits();
-      fetchPlatformDetails();
+      if (user.status === "pending") {
+        fetchPlatformDetails();
+      }
     }
-  }, [user?.status]);
+  }, [user]);
 
   // Check and run payment verification if redirected back from Stripe
   useEffect(() => {
@@ -257,14 +260,37 @@ export default function DashboardPage() {
 
     // Handle course package success URL
     const coursePayment = params.get("course_payment");
-    if (coursePayment === "success") {
+    const courseSessionId = params.get("session_id");
+    if (coursePayment === "success" && courseSessionId) {
       const newUrl = window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
-      toast({
-        title: "Course Purchased!",
-        description: "Your ₹1,00,000 course package was successful. You have received 2 activation coupons in your wallet.",
-      });
-      // Optionally invalidate queries if we had a query fetching coupons here
+
+      setVerifyingPayment(true);
+      verifyCheckoutSession.mutate(
+        { data: { sessionId: courseSessionId } },
+        {
+          onSuccess: (data: any) => {
+            queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() });
+            queryClient.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
+            queryClient.invalidateQueries({ queryKey: getGetRecentActivityQueryKey() });
+            toast({
+              title: data?.status === "active" ? "🎉 Account Activated!" : "Payment Received!",
+              description: data?.status === "active"
+                ? "Your course package payment was verified. Your account is now active and placed in the network!"
+                : "Payment received. Awaiting admin KYC review to complete activation.",
+            });
+            setVerifyingPayment(false);
+          },
+          onError: (err: any) => {
+            toast({
+              variant: "destructive",
+              title: "Verification Failed",
+              description: err.message || "Could not verify course payment.",
+            });
+            setVerifyingPayment(false);
+          },
+        }
+      );
     } else if (coursePayment === "cancelled") {
       const newUrl = window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
@@ -274,7 +300,7 @@ export default function DashboardPage() {
         description: "Course package purchase was cancelled.",
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryClient]);
 
   useEffect(() => {
@@ -289,9 +315,9 @@ export default function DashboardPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent/20 border border-accent/30 animate-pulse">
             <CheckCircle className="w-8 h-8 text-accent" />
           </div>
-          <h2 className="text-xl font-bold text-foreground">Verifying Stripe Payment</h2>
+          <h2 className="text-xl font-bold text-foreground">Verifying Payment</h2>
           <p className="text-sm text-muted-foreground">
-            We are confirming your registration fee with Stripe. Your NetPro distributor account will activate momentarily...
+            Confirming your payment with Stripe and activating your account. This only takes a moment...
           </p>
           <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mt-4" />
         </div>
@@ -332,7 +358,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Pending Activation Banner */}
+        {/* Pending Activation Banner (Course Purchase) */}
         {user?.status === "pending" && (
           <div className="bg-card border border-yellow-500/25 rounded-xl p-5 relative overflow-hidden space-y-5">
             {/* Header */}
@@ -392,8 +418,7 @@ export default function DashboardPage() {
                 {/* Admin transfer alternative */}
                 <div className="p-3 rounded-lg bg-secondary border border-border text-xs text-muted-foreground space-y-1">
                   <p className="font-medium text-foreground">Prefer offline payment?</p>
-                  <p>Contact your admin or sponsor and provide them your User ID. They can activate your account directly and transfer the USDT balance to your wallet.</p>
-                  <p className="font-mono text-primary mt-1">Your User ID: <strong>{user.id}</strong></p>
+                  <p>Contact your admin or sponsor and provide them your Wallet ID. They can activate your account directly and transfer the USDT balance to your wallet.</p>
                 </div>
               </div>
             )}
@@ -433,26 +458,47 @@ export default function DashboardPage() {
         )}
 
 
-        {/* Payment Received, Pending KYC Approval Banner */}
-        {user?.status === "pending" && user?.isPaid && (
-          <div className="bg-card border border-accent/25 rounded-xl p-5 relative overflow-hidden bg-[radial-gradient(ellipse_at_top,_hsl(168_84%_30%_/_0.05)_0%,_transparent_70%)]">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-accent font-semibold text-sm">
-                  <CheckCircle className="w-4 h-4 text-accent" />
-                  Registration Payment Received
-                </div>
-                <p className="text-xs text-muted-foreground max-w-2xl mt-1">
-                  Thank you! Your **$30.00** registration fee has been successfully processed via Stripe. Your account is currently awaiting administrator review of your uploaded KYC documents. We will activate your dashboard features as soon as the review is complete.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/20 text-accent text-xs font-semibold whitespace-nowrap self-start md:self-auto">
-                <Clock className="w-3.5 h-3.5 text-accent animate-spin" style={{ animationDuration: "3s" }} />
-                Awaiting KYC Review
-              </div>
-            </div>
+
+        {/* KYC Verification Status — visible for all users */}
+        <div className={cn(
+          "rounded-xl p-4 border flex items-start gap-3",
+          user?.isKycVerified
+            ? "bg-accent/5 border-accent/20"
+            : user?.status === "active"
+            ? "bg-yellow-500/5 border-yellow-500/20"
+            : "bg-card border-card-border"
+        )}>
+          <div className={cn(
+            "p-2 rounded-lg shrink-0",
+            user?.isKycVerified ? "bg-accent/15" : "bg-yellow-500/15"
+          )}>
+            {user?.isKycVerified
+              ? <CheckCircle className="w-4 h-4 text-accent" />
+              : <AlertCircle className="w-4 h-4 text-yellow-500" />}
           </div>
-        )}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className={cn("text-sm font-semibold", user?.isKycVerified ? "text-accent" : "text-yellow-500")}>
+                {user?.isKycVerified ? "KYC Verified" : "KYC Verification Pending"}
+              </p>
+              <span className={cn(
+                "text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider",
+                user?.isKycVerified
+                  ? "bg-accent/20 text-accent border border-accent/25"
+                  : "bg-yellow-500/20 text-yellow-500 border border-yellow-500/25"
+              )}>
+                {user?.isKycVerified ? "✓ Verified" : "Pending"}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {user?.isKycVerified
+                ? "Your identity has been verified by the admin. You are fully eligible for commissions and withdrawals."
+                : user?.status === "active"
+                ? "Your account is active but KYC verification is still pending. Some features may be restricted until admin completes the review."
+                : "Your KYC documents will be reviewed by an admin after account activation."}
+            </p>
+          </div>
+        </div>
 
         {/* Stats grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -484,11 +530,17 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* BV Progress */}
+        {/* Commission Progress */}
         <div className="bg-card border border-card-border rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-foreground">Binary Volume Progress</h2>
-            <span className="text-xs text-muted-foreground">3,000 BV per cycle → $70 bonus</span>
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold text-foreground">Network & Commission Progress</h2>
+              <p className="text-xs text-muted-foreground">Track your binary volume and referral rewards</p>
+            </div>
+            <div className="text-right space-y-1">
+              <span className="block text-xs font-medium text-muted-foreground">3,000 BV per cycle → $70 bonus</span>
+              <span className="inline-block text-xs font-medium text-accent bg-accent/10 px-2 py-0.5 rounded">10% Direct Commission</span>
+            </div>
           </div>
           <div className="space-y-4">
             <BvProgressBar label="Left" current={summary?.leftBv ?? 0} target={CYCLE_BV} color="left" />
@@ -584,6 +636,47 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* My Deposit Requests Section */}
+        {myDeposits.length > 0 && (
+          <div className="bg-card border border-card-border rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Wallet className="w-5 h-5 text-primary" />
+              <h2 className="text-sm font-semibold text-foreground">My Deposit Requests</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-2 font-semibold text-muted-foreground">Date</th>
+                    <th className="text-left py-2 font-semibold text-muted-foreground">Amount</th>
+                    <th className="text-left py-2 font-semibold text-muted-foreground">Status</th>
+                    <th className="text-left py-2 font-semibold text-muted-foreground">Network</th>
+                    <th className="text-left py-2 font-semibold text-muted-foreground">Wallet</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {myDeposits.map((d: any) => (
+                    <tr key={d.id} className="hover:bg-secondary/10">
+                      <td className="py-3 text-muted-foreground">{new Date(d.createdAt).toLocaleDateString()}</td>
+                      <td className="py-3 font-semibold text-foreground">{d.amountInUSDT} USDT</td>
+                      <td className="py-3">
+                        <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
+                          d.status === "PENDING" ? "bg-yellow-500/10 text-yellow-500" :
+                          d.status === "APPROVED" ? "bg-accent/10 text-accent" : "bg-destructive/10 text-destructive"
+                        )}>
+                          {d.status}
+                        </span>
+                      </td>
+                      <td className="py-3 text-muted-foreground">{d.blockchainNetwork}</td>
+                      <td className="py-3 text-muted-foreground font-mono text-xs">{d.senderWalletAddress.slice(0,6)}...{d.senderWalletAddress.slice(-4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   );

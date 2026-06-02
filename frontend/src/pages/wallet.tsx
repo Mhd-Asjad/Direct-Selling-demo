@@ -5,7 +5,7 @@ import {
   useListWalletTransactions, getListWalletTransactionsQueryKey,
   useListCoupons, getListCouponsQueryKey,
   useCreateCoupon, useRedeemCoupon, useUpdateWalletPin,
-} from "@workspace/api-client-react";
+} from "@/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
@@ -109,8 +109,8 @@ export default function WalletPage() {
 
   const redeemCoupon = useRedeemCoupon({
     mutation: {
-      onSuccess: (coupon) => {
-        toast({ title: `Coupon redeemed: $${coupon.amount} applied` });
+      onSuccess: (coupon: any) => {
+        toast({ title: `Coupon redeemed: $${(coupon.creditedUsdt ?? coupon.amount).toFixed(2)} USDT credited to wallet` });
         setShowRedeem(false);
         redeemForm.reset();
         invalidateWallet();
@@ -215,10 +215,10 @@ export default function WalletPage() {
                   <p className="text-sm text-muted-foreground">No coupons yet</p>
                 </div>
               ) : (
-                coupons?.map((coupon) => (
-                  <div key={coupon.id} className="flex items-center gap-3 px-5 py-3" data-testid={`coupon-${coupon.id}`}>
+                coupons?.map((coupon: any) => (
+                  <div key={coupon.id} className="flex items-start gap-3 px-5 py-3" data-testid={`coupon-${coupon.id}`}>
                     <div className={cn(
-                      "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                      "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5",
                       coupon.status === "active" ? "bg-accent/20" : "bg-secondary"
                     )}>
                       {coupon.status === "active"
@@ -228,20 +228,51 @@ export default function WalletPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-mono text-foreground truncate">{coupon.code}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className={cn("text-xs px-1.5 py-0.5 rounded font-medium",
                           coupon.status === "active" ? "bg-accent/20 text-accent" : "bg-secondary text-muted-foreground"
                         )}>
                           {coupon.status}
                         </span>
-                        <span className="text-xs text-muted-foreground">${coupon.amount.toFixed(2)}</span>
+                        {coupon.couponType === "activation" && (
+                          <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-primary/15 text-primary">
+                            activation
+                          </span>
+                        )}
+                        <span className="text-xs text-muted-foreground">
+                          {coupon.couponType === "activation"
+                            ? `₹${parseFloat(coupon.amount).toLocaleString()} (~$${Math.round(coupon.amount / 83)} USDT)`
+                            : `$${coupon.amount.toFixed(2)}`
+                          }
+                        </span>
                       </div>
+                      {/* Activation coupon actions */}
+                      {coupon.status === "active" && coupon.couponType === "activation" && (
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                          <button
+                            className="text-[11px] px-2 py-1 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20 hover:bg-yellow-500/20 transition-colors"
+                            onClick={() => redeemCoupon.mutate({ data: { code: coupon.code } })}
+                            disabled={redeemCoupon.isPending}
+                          >
+                            Redeem as USDT (~${Math.round(coupon.amount / 83)} USDT)
+                          </button>
+                          {user?.status === "pending" && (
+                            <button
+                              className="text-[11px] px-2 py-1 rounded bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                              onClick={() => setLocation("/dashboard")}
+                            >
+                              Use to Activate Account
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                     {coupon.status === "active" && (
                       <button
                         data-testid={`button-copy-coupon-${coupon.id}`}
                         onClick={() => handleCopy(coupon.code)}
-                        className="p-1.5 rounded-lg hover:bg-secondary transition-colors"
+                        className="p-1.5 rounded-lg hover:bg-secondary transition-colors mt-0.5"
+                        title="Copy code to use for account activation"
                       >
                         {copiedCode === coupon.code
                           ? <Check className="w-4 h-4 text-accent" />

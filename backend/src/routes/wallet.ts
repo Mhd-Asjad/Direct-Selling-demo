@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcrypt";
-import { db, walletsTable, walletTransactionsTable, couponsTable, activityFeedTable } from "@workspace/db";
+import { db, walletsTable, walletTransactionsTable, couponsTable, activityFeedTable } from "../db";
 import { eq } from "drizzle-orm";
-import { VerifyWalletPinBody, UpdateWalletPinBody, CreateCouponBody, RedeemCouponBody } from "@workspace/api-zod";
+import { VerifyWalletPinBody, UpdateWalletPinBody, CreateCouponBody, RedeemCouponBody } from "../api-zod";
 import { debitWallet, creditWallet } from "../lib/commissions";
 
 const router: IRouter = Router();
@@ -184,6 +184,7 @@ router.get("/wallet/coupons", async (req, res): Promise<void> => {
         code: c.code,
         amount: parseFloat(c.amount),
         status: c.status,
+        couponType: c.couponType,
         redeemedAt: c.redeemedAt?.toISOString() ?? null,
         createdAt: c.createdAt.toISOString(),
       })),
@@ -278,27 +279,38 @@ router.post("/wallet/coupons/redeem", async (req, res): Promise<void> => {
     return;
   }
 
+  // Ownership check — user can only redeem their own coupons
+  if (coupon.userId !== userId) {
+    res.status(403).json({ error: "This coupon does not belong to your account" });
+    return;
+  }
+
   if (coupon.status !== "active") {
     res.status(400).json({ error: "Coupon is already used or expired" });
     return;
   }
 
-  const couponAmount = parseFloat(coupon.amount);
   const now = new Date();
   const [updated] = await db
     .update(couponsTable)
-    .set({ status: "redeemed", redeemedAt: now })
+    .set({ status: "redeemed", redeemedAt: now, redeemedBy: userId })
     .where(eq(couponsTable.code, body.data.code))
     .returning();
 
-  // ✅ Credit the coupon value into the user's wallet balance
-  await creditWallet(userId, couponAmount, `Coupon redeemed: ${body.data.code}`, `coupon:${coupon.id}`);
+  // INR → USDT conversion for activation coupons (₹50,000 = 600 USDT)
+  let creditAmount = parseFloat(coupon.amount);
+  if (coupon.couponType === "activation") {
+    creditAmount = Math.round((parseFloat(coupon.amount) / 83) * 100) / 100; // ~600 USDT for ₹50,000
+  }
+
+  // Credit the converted value into the user's wallet balance
+  await creditWallet(userId, creditAmount, `Coupon redeemed as USDT: ${body.data.code}`, `coupon:${coupon.id}`);
 
   await db.insert(activityFeedTable).values({
     userId,
     type: "coupon_redeemed",
-    message: `Redeemed coupon ${body.data.code} worth $${couponAmount.toFixed(2)} — balance credited`,
-    amount: coupon.amount,
+    message: `Redeemed coupon ${body.data.code} — $${creditAmount.toFixed(2)} USDT credited to wallet`,
+    amount: String(creditAmount),
   });
 
   res.json({
@@ -306,7 +318,9 @@ router.post("/wallet/coupons/redeem", async (req, res): Promise<void> => {
     userId: updated.userId,
     code: updated.code,
     amount: parseFloat(updated.amount),
+    creditedUsdt: creditAmount,
     status: updated.status,
+    couponType: updated.couponType,
     redeemedAt: updated.redeemedAt?.toISOString() ?? null,
     createdAt: updated.createdAt.toISOString(),
   });

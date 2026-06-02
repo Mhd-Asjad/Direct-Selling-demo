@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { useLogoutUser, getGetCurrentUserQueryKey } from "@workspace/api-client-react";
+import { useLogoutUser, getGetCurrentUserQueryKey } from "@/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard,
@@ -12,12 +12,14 @@ import {
   ChevronRight,
   Menu,
   X,
+  User,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/profile", label: "Profile", icon: User },
   { href: "/network", label: "Network", icon: Network },
   { href: "/commissions", label: "Commissions", icon: DollarSign },
   { href: "/wallet", label: "E-Wallet", icon: Wallet },
@@ -104,7 +106,7 @@ export default function Layout({ children }: LayoutProps) {
                   : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
               )}
             >
-              <Icon className="w-4 h-4 flex-shrink-0" />
+              <Icon className="w-4 h-4 shrink-0" />
               <span>{item.label}</span>
               {active && <ChevronRight className="w-3 h-3 ml-auto" />}
             </Link>
@@ -140,23 +142,6 @@ export default function Layout({ children }: LayoutProps) {
         )}
       </nav>
 
-      {/* Referral link */}
-      {user?.status === "active" && (
-        <div className="px-3 mb-3">
-          <div className="px-3 py-2.5 rounded-lg bg-primary/10 border border-primary/20">
-            <p className="text-xs font-semibold text-primary mb-1">Your Referral Link</p>
-            <p className="text-xs text-muted-foreground font-mono truncate">?ref={user.referralCode}</p>
-            <button
-              data-testid="button-copy-referral"
-              onClick={() => navigator.clipboard?.writeText(`${window.location.origin}${import.meta.env.BASE_URL}register?ref=${user.referralCode}`)}
-              className="mt-1.5 text-xs text-primary hover:underline"
-            >
-              Copy link
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Logout */}
       <div className="px-3 pb-4 border-t border-sidebar-border pt-3">
         <button
@@ -174,7 +159,7 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-64 flex-col bg-sidebar border-r border-sidebar-border flex-shrink-0">
+      <aside className="hidden md:flex w-64 flex-col bg-sidebar border-r border-sidebar-border shrink-0">
         <NavContent />
       </aside>
 

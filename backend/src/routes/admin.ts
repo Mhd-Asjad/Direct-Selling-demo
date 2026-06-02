@@ -1,10 +1,11 @@
 import { Router, type IRouter } from "express";
-import { db, financialLedgerTable, washEventsTable, walletsTable, commissionsTable, networkNodesTable, usersTable, coursesTable, walletTransactionsTable, activityFeedTable } from "@workspace/db";
+import { db, financialLedgerTable, washEventsTable, walletsTable, commissionsTable, networkNodesTable, usersTable, coursesTable, walletTransactionsTable, activityFeedTable, couponsTable, cryptoTransactionsTable } from "../db";
 import { eq } from "drizzle-orm";
-import { ExecuteWashResetBody, CreateAdminCourseBody, UpdateAdminCourseBody } from "@workspace/api-zod";
+import { ExecuteWashResetBody, CreateAdminCourseBody, UpdateAdminCourseBody } from "../api-zod";
 import bcrypt from "bcrypt";
 import { activateUser } from "../lib/activation";
 import { creditWallet } from "../lib/commissions";
+import { appCache } from "../lib/cache";
 
 const router: IRouter = Router();
 
@@ -13,6 +14,13 @@ const COMMISSION_RATE = 0.10;
 const RETENTION_RATE = 0.60;
 
 router.get("/admin/financial-stats", async (_req, res): Promise<void> => {
+  const cacheKey = "admin:financial-stats";
+  const cachedData = appCache.get(cacheKey);
+  if (cachedData) {
+    res.json(cachedData);
+    return;
+  }
+
   const ledger = await db.select().from(financialLedgerTable);
 
   const totalInflow = ledger
@@ -31,7 +39,7 @@ router.get("/admin/financial-stats", async (_req, res): Promise<void> => {
   const washRatio = totalInflow > 0 ? (totalOutflow / totalInflow) : 0;
   const isInsolvent = totalOutflow > totalInflow;
 
-  res.json({
+  const responseData = {
     totalInflow,
     totalCommissionPaid,
     totalExpenses,
@@ -41,7 +49,10 @@ router.get("/admin/financial-stats", async (_req, res): Promise<void> => {
     retentionPool: totalInflow * RETENTION_RATE,
     overheadPool: totalInflow * OVERHEAD_RATE,
     commissionPool: totalInflow * COMMISSION_RATE,
-  });
+  };
+
+  appCache.set(cacheKey, responseData, 5 * 60 * 1000); // 5 min cache
+  res.json(responseData);
 });
 
 router.post("/admin/wash-reset", async (req, res): Promise<void> => {
@@ -126,6 +137,13 @@ router.post("/admin/wash-reset", async (req, res): Promise<void> => {
 });
 
 router.get("/admin/bv-stats", async (_req, res): Promise<void> => {
+  const cacheKey = "admin:bv-stats";
+  const cachedData = appCache.get(cacheKey);
+  if (cachedData) {
+    res.json(cachedData);
+    return;
+  }
+
   const nodes = await db.select().from(networkNodesTable);
   const users = await db.select().from(usersTable);
   const commissions = await db.select().from(commissionsTable);
@@ -139,15 +157,19 @@ router.get("/admin/bv-stats", async (_req, res): Promise<void> => {
     0,
   );
   const totalBonusPaid = binaryCommissions.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+
   const activeMemberCount = users.filter((u) => u.status === "active").length;
 
-  res.json({
+  const responseData = {
     globalLeftBv,
     globalRightBv,
     totalMatchedCycles,
     totalBonusPaid,
     activeMemberCount,
-  });
+  };
+
+  appCache.set(cacheKey, responseData, 5 * 60 * 1000); // 5 min cache
+  res.json(responseData);
 });
 
 router.get("/admin/wash-history", async (_req, res): Promise<void> => {
@@ -254,7 +276,9 @@ router.delete("/admin/courses/:id", async (req, res): Promise<void> => {
 });
 
 
-// ── POST /admin/transfer-activation — admin directly activates a user ──────────
+// ── POST /admin/transfer-activation — issue 2 activation coupons to a user ─────
+// Replaces direct activation: issues 2 × ₹50,000 activation coupons the user
+// can redeem as USDT balance OR use both together to activate their account.
 router.post("/admin/transfer-activation", async (req, res): Promise<void> => {
   const sessionUserId = (req.session as any).userId;
   if (!sessionUserId) {
@@ -274,25 +298,26 @@ router.post("/admin/transfer-activation", async (req, res): Promise<void> => {
   let resolvedUserId: number | null = null;
 
   if (targetWalletId && typeof targetWalletId === "string") {
-    // Look up by walletId on the wallets table
     const normalizedWalletId = targetWalletId.trim().toUpperCase();
     const [wallet] = await db
       .select()
       .from(walletsTable)
       .where(eq(walletsTable.walletId, normalizedWalletId));
-    if (!wallet) {
+      
+    if (wallet) {
+      resolvedUserId = wallet.userId;
+    } else if (!isNaN(Number(normalizedWalletId))) {
+      resolvedUserId = parseInt(normalizedWalletId, 10);
+    } else {
       res.status(404).json({ error: `No user found with Wallet ID: ${normalizedWalletId}` });
       return;
     }
-    resolvedUserId = wallet.userId;
   } else if (targetUserId && typeof targetUserId === "number") {
     resolvedUserId = targetUserId;
   } else {
     res.status(400).json({ error: "Provide either targetWalletId (string) or targetUserId (number)" });
     return;
   }
-
-  const creditAmount = typeof amountUSDT === "number" && amountUSDT > 0 ? amountUSDT : 1200;
 
   const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, resolvedUserId));
   if (!targetUser) {
@@ -306,39 +331,255 @@ router.post("/admin/transfer-activation", async (req, res): Promise<void> => {
   }
 
   try {
-    // 1. Activate user — places in binary tree, propagates BV, awards commissions
-    const activatedUser = await activateUser(resolvedUserId, 3000);
+    // Issue 2 × ₹50,000 activation coupons — same flow as USDT deposit approval.
+    // The user can redeem them as USDT balance OR use both to activate their account.
+    const code1 = `CPN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    const code2 = `CPN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
 
-    // 2. Credit their wallet with the activation amount
-    await creditWallet(
-      resolvedUserId,
-      creditAmount,
-      note || `Admin activation transfer from ${admin.firstName} ${admin.lastName}`,
-      `admin_activation:${sessionUserId}:${Date.now()}`
-    );
+    await db.insert(couponsTable).values([
+      { userId: resolvedUserId, code: code1, amount: "50000", couponType: "activation", status: "active", generatedBy: `admin:${sessionUserId}` },
+      { userId: resolvedUserId, code: code2, amount: "50000", couponType: "activation", status: "active", generatedBy: `admin:${sessionUserId}` },
+    ]);
 
-    // 3. Log financial ledger inflow
+    // Log financial ledger inflow
+    const creditAmount = typeof amountUSDT === "number" && amountUSDT > 0 ? amountUSDT : 1200;
     await db.insert(financialLedgerTable).values({
       type: "inflow",
       amount: String(creditAmount),
-      description: `Admin USDT transfer activation — ${activatedUser.firstName} ${activatedUser.lastName} (by admin #${sessionUserId})`,
+      description: `Admin USDT transfer — ${targetUser.firstName} ${targetUser.lastName} (admin #${sessionUserId})${note ? `: ${note}` : ""}`,
       userId: resolvedUserId,
     });
 
-    // 4. Lookup the wallet ID to include in response
+    // Log activity feed
+    await db.insert(activityFeedTable).values({
+      userId: resolvedUserId,
+      type: "coupon_created",
+      message: `2 activation coupons issued by admin${note ? ` (${note})` : " after USDT transfer"}`,
+      amount: "100000",
+    });
+
     const [activatedWallet] = await db.select().from(walletsTable).where(eq(walletsTable.userId, resolvedUserId));
 
     res.json({
       success: true,
       userId: resolvedUserId,
       walletId: activatedWallet?.walletId ?? null,
-      status: activatedUser.status,
-      creditedAmount: creditAmount,
-      message: `User ${activatedUser.firstName} ${activatedUser.lastName} has been activated and ${creditAmount} USDT credited to their wallet.`,
+      coupon1: code1,
+      coupon2: code2,
+      message: `2 activation coupons (₹50,000 each) issued to ${targetUser.firstName} ${targetUser.lastName}. They can redeem as USDT or use both to activate their account.`,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || "Failed to transfer activation" });
+    res.status(500).json({ error: err.message || "Failed to issue coupons" });
   }
+});
+
+// ── POST /admin/issue-coupons ─ Admin issues 2 activation coupons to a user ────────
+// This is the primary manual activation path: admin verifies offline/cash payment
+// and issues coupons the user can then redeem on their dashboard.
+router.post("/admin/issue-coupons", async (req, res): Promise<void> => {
+  const sessionUserId = (req.session as any).userId;
+  if (!sessionUserId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const [admin] = await db.select().from(usersTable).where(eq(usersTable.id, sessionUserId));
+  if (!admin || admin.role !== "admin") {
+    res.status(403).json({ error: "Admin access required" });
+    return;
+  }
+
+  const { targetWalletId, targetUserId, note } = req.body;
+
+  // Resolve user
+  let resolvedUserId: number | null = null;
+  if (targetWalletId && typeof targetWalletId === "string") {
+    const normalized = targetWalletId.trim().toUpperCase();
+    const [wallet] = await db.select().from(walletsTable).where(eq(walletsTable.walletId, normalized));
+    if (wallet) {
+      resolvedUserId = wallet.userId;
+    } else if (!isNaN(Number(normalized))) {
+      resolvedUserId = parseInt(normalized, 10);
+    } else {
+      res.status(404).json({ error: `No user found with Wallet ID: ${normalized}` });
+      return;
+    }
+  } else if (typeof targetUserId === "number") {
+    resolvedUserId = targetUserId;
+  } else {
+    res.status(400).json({ error: "Provide either targetWalletId (string) or targetUserId (number)" });
+    return;
+  }
+
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, resolvedUserId));
+  if (!targetUser) {
+    res.status(404).json({ error: "Target user not found" });
+    return;
+  }
+
+  if (targetUser.status === "active") {
+    res.status(409).json({ error: "User is already active" });
+    return;
+  }
+
+  try {
+    const code1 = `CPN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    const code2 = `CPN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+
+    await db.insert(couponsTable).values([
+      { userId: resolvedUserId, code: code1, amount: "50000", couponType: "activation", status: "active", generatedBy: `admin:${sessionUserId}` },
+      { userId: resolvedUserId, code: code2, amount: "50000", couponType: "activation", status: "active", generatedBy: `admin:${sessionUserId}` },
+    ]);
+
+    // Log in activity feed
+    await db.insert(activityFeedTable).values({
+      userId: resolvedUserId,
+      type: "coupon_created",
+      message: `2 activation coupons issued by admin${note ? `: ${note}` : " (manual/offline payment)"}`,
+      amount: "100000",
+    });
+
+    res.json({
+      success: true,
+      coupon1: code1,
+      coupon2: code2,
+      message: `2 activation coupons issued to ${targetUser.firstName} ${targetUser.lastName}. Share these codes with the user to activate their account.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to issue coupons" });
+  }
+});
+
+// ── GET /admin/stripe-payments — list Stripe course purchase transactions ────
+router.get("/admin/stripe-payments", async (req, res): Promise<void> => {
+  const sessionUserId = (req.session as any).userId;
+  if (!sessionUserId) { res.status(401).json({ error: "Not authenticated" }); return; }
+  const [admin] = await db.select().from(usersTable).where(eq(usersTable.id, sessionUserId));
+  if (!admin || admin.role !== "admin") { res.status(403).json({ error: "Admin access required" }); return; }
+
+  const transactions = await db.select().from(cryptoTransactionsTable).where(eq(cryptoTransactionsTable.network, "stripe"));
+  const allUsers = await db.select().from(usersTable);
+  const userMap = new Map(allUsers.map(u => [u.id, u]));
+
+  res.json(
+    transactions
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map(tx => {
+        const u = userMap.get(tx.userId);
+        return {
+          id: tx.id,
+          userId: tx.userId,
+          userName: u ? `${u.firstName} ${u.lastName}` : null,
+          userEmail: u?.email ?? null,
+          userStatus: u?.status ?? null,
+          isKycVerified: u?.isKycVerified ?? false,
+          txHash: tx.txHash,
+          amount: parseFloat(tx.amount),
+          currency: tx.currency,
+          status: tx.status,
+          confirmedAt: tx.confirmedAt?.toISOString() ?? null,
+          createdAt: tx.createdAt.toISOString(),
+        };
+      })
+  );
+});
+
+// ── POST /admin/users/:id/approve-kyc — mark user as KYC verified ──────────
+router.post("/admin/users/:id/approve-kyc", async (req, res): Promise<void> => {
+  const sessionUserId = (req.session as any).userId;
+  if (!sessionUserId) { res.status(401).json({ error: "Not authenticated" }); return; }
+  const [admin] = await db.select().from(usersTable).where(eq(usersTable.id, sessionUserId));
+  if (!admin || admin.role !== "admin") { res.status(403).json({ error: "Admin access required" }); return; }
+
+  const targetId = parseInt(req.params.id);
+  const [updated] = await db
+    .update(usersTable)
+    .set({ isKycVerified: true })
+    .where(eq(usersTable.id, targetId))
+    .returning();
+
+  if (!updated) { res.status(404).json({ error: "User not found" }); return; }
+
+  // If the user has already paid (either via Stripe or admin coupon/transfer) 
+  // but their status is still pending, activate them now that KYC is approved.
+  if (updated.isPaid && updated.status === "pending") {
+    const isCoursePackage = updated.packageType === "course_package" || updated.packageType === "course";
+    const bv = isCoursePackage ? 3000 : 30;
+    const comm = isCoursePackage ? 1000 : 30;
+    try {
+      await activateUser(targetId, bv, comm);
+    } catch (e: any) {
+      console.error(`Failed to activate user ${targetId} during KYC approval:`, e);
+      // Even if activation fails, we still want to record the KYC approval
+    }
+  }
+
+  await db.insert(activityFeedTable).values({
+    userId: targetId,
+    type: "registration",
+    message: `KYC verified by admin #${sessionUserId}`,
+    amount: null,
+  });
+
+  res.json({ success: true, isKycVerified: true });
+});
+
+// ── GET /admin/users/:id/profile — rich user profile for admin ──────────────
+router.get("/admin/users/:id/profile", async (req, res): Promise<void> => {
+  const sessionUserId = (req.session as any).userId;
+  if (!sessionUserId) { res.status(401).json({ error: "Not authenticated" }); return; }
+  const [admin] = await db.select().from(usersTable).where(eq(usersTable.id, sessionUserId));
+  if (!admin || admin.role !== "admin") { res.status(403).json({ error: "Admin access required" }); return; }
+
+  const targetId = parseInt(req.params.id);
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, targetId));
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+  const [wallet] = await db.select().from(walletsTable).where(eq(walletsTable.userId, targetId));
+  const [networkNode] = await db.select().from(networkNodesTable).where(eq(networkNodesTable.userId, targetId));
+
+  let sponsor = null;
+  if (user.sponsorId) {
+    const [s] = await db.select().from(usersTable).where(eq(usersTable.id, user.sponsorId));
+    if (s) sponsor = { id: s.id, firstName: s.firstName, lastName: s.lastName, email: s.email, referralCode: s.referralCode };
+  }
+
+  const downlineNodes = await db.select().from(networkNodesTable).where(eq(networkNodesTable.sponsorId, targetId));
+
+  res.json({
+    id: user.id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    username: user.username ?? null,
+    mobileNumber: user.mobileNumber ?? null,
+    address: user.address ?? null,
+    state: user.state ?? null,
+    city: user.city ?? null,
+    dob: user.dob ?? null,
+    gender: user.gender ?? null,
+    countryCode: user.countryCode ?? null,
+    status: user.status,
+    isPaid: user.isPaid,
+    isKycVerified: user.isKycVerified,
+    role: user.role,
+    packageType: user.packageType ?? null,
+    referralCode: user.referralCode,
+    placementSide: user.placementSide ?? null,
+    usdtAddress: user.usdtAddress ?? null,
+    profilePhoto: user.profilePhoto ?? null,
+    govtIdProof: user.govtIdProof ?? null,
+    leftBv: parseFloat(user.leftBv ?? "0"),
+    rightBv: parseFloat(user.rightBv ?? "0"),
+    walletId: wallet?.walletId ?? null,
+    walletBalance: parseFloat(wallet?.availableBalance ?? "0"),
+    totalEarned: parseFloat(wallet?.totalEarned ?? "0"),
+    sponsor,
+    networkDepth: networkNode?.depth ?? null,
+    networkLeg: networkNode?.leg ?? null,
+    downlineCount: downlineNodes.length,
+    createdAt: user.createdAt.toISOString(),
+  });
 });
 
 export default router;
