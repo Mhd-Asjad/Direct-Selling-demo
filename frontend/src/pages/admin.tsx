@@ -64,9 +64,6 @@ export default function AdminPage() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [courseDialog, setCourseDialog] = useState<{ open: boolean; mode: "create" | "edit"; id?: number }>({ open: false, mode: "create" });
   const [selectedKycUser, setSelectedKycUser] = useState<any>(null);
-  const [submissions, setSubmissions] = useState<any[]>([]);
-  const [submissionsLoading, setSubmissionsLoading] = useState(false);
-  const [actionPending, setActionPending] = useState<number | null>(null);
   const [usdtDeposits, setUsdtDeposits] = useState<any[]>([]);
   const [usdtDepositsLoading, setUsdtDepositsLoading] = useState(false);
   const [depositActionPending, setDepositActionPending] = useState<number | null>(null);
@@ -77,7 +74,6 @@ export default function AdminPage() {
   const [issuedCoupons, setIssuedCoupons] = useState<{ coupon1: string; coupon2: string; message: string } | null>(null);
   const [stripePayments, setStripePayments] = useState<any[]>([]);
   const [stripePaymentsLoading, setStripePaymentsLoading] = useState(false);
-  const [paymentsSubTab, setPaymentsSubTab] = useState<"manual" | "stripe">("stripe");
   const [profileUser, setProfileUser] = useState<any | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [kycPending, setKycPending] = useState<number | null>(null);
@@ -108,32 +104,6 @@ export default function AdminPage() {
     query: { queryKey: getGetNetworkStatsQueryKey(), enabled: !!isAdmin },
   });
 
-  const fetchSubmissions = async () => {
-    if (!isAdmin) return;
-    setSubmissionsLoading(true);
-    try {
-      const res = await apiFetch("/api/onboarding/admin/submissions");
-      if (res.ok) setSubmissions(await res.json());
-    } finally { setSubmissionsLoading(false); }
-  };
-
-  const handleSubmissionAction = async (id: number, action: "approve" | "reject", reason?: string) => {
-    setActionPending(id);
-    try {
-      const res = await apiFetch(`/api/onboarding/admin/submissions/${id}/${action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action === "reject" ? { reason } : {}),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast({ title: action === "approve" ? "Payment approved — coupons issued!" : "Submission rejected." });
-      fetchSubmissions();
-      queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
-    } catch (err: any) {
-      toast({ title: "Action failed", description: err.message, variant: "destructive" });
-    } finally { setActionPending(null); }
-  };
   const fetchUsdtDeposits = async () => {
     if (!isAdmin) return;
     setUsdtDepositsLoading(true);
@@ -190,7 +160,7 @@ export default function AdminPage() {
     } finally { setStripePaymentsLoading(false); }
   };
 
-  useEffect(() => { if (activeTab === "Payments") { fetchSubmissions(); fetchStripePayments(); } }, [activeTab, isAdmin]);
+  useEffect(() => { if (activeTab === "Payments") { fetchStripePayments(); } }, [activeTab, isAdmin]);
 
   const handleApproveKyc = async (userId: number) => {
     setKycPending(userId);
@@ -666,35 +636,18 @@ export default function AdminPage() {
         {/* PAYMENTS TAB */}
         {activeTab === "Payments" && (
           <div className="space-y-4">
-            {/* Sub-tab bar */}
-            <div className="flex items-center justify-between">
-              <div className="flex gap-1 bg-secondary rounded-lg p-1">
-                {(["stripe", "manual"] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setPaymentsSubTab(t)}
-                    className={cn(
-                      "px-4 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                      paymentsSubTab === t ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {t === "stripe" ? <><CreditCard className="w-3 h-3" /> Stripe Payments</> : <><FileText className="w-3 h-3" /> Manual Submissions</>}
-                  </button>
-                ))}
-              </div>
-              <Button size="sm" variant="outline" onClick={() => { fetchSubmissions(); fetchStripePayments(); }} disabled={submissionsLoading || stripePaymentsLoading}>
-                <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", (submissionsLoading || stripePaymentsLoading) && "animate-spin")} /> Refresh
-              </Button>
-            </div>
-
-            {/* ── Stripe Payments sub-tab ── */}
-            {paymentsSubTab === "stripe" && (
-              <div className="space-y-3">
+            {/* ── Stripe Payments ── */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">Stripe Course Purchases</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">All Stripe-processed course package payments. Accounts are auto-activated on payment.</p>
                 </div>
-                <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+                <Button size="sm" variant="outline" onClick={() => fetchStripePayments()} disabled={stripePaymentsLoading}>
+                  <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", stripePaymentsLoading && "animate-spin")} /> Refresh
+                </Button>
+              </div>
+              <div className="bg-card border border-card-border rounded-xl overflow-hidden">
                   {stripePaymentsLoading ? (
                     <div className="p-8 text-center"><div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" /></div>
                   ) : stripePayments.length === 0 ? (
@@ -748,86 +701,8 @@ export default function AdminPage() {
                       ))}
                     </div>
                   )}
-                </div>
               </div>
-            )}
-
-            {/* ── Manual Submissions sub-tab ── */}
-            {paymentsSubTab === "manual" && (
-              <div className="space-y-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-foreground">Manual Payment Submissions</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Review and approve manual (USDT transfer / cash) payment submissions</p>
-                </div>
-                <div className="bg-card border border-card-border rounded-xl overflow-hidden">
-                  {submissionsLoading ? (
-                    <div className="p-8 text-center"><div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" /></div>
-                  ) : submissions.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-muted-foreground">No payment submissions yet</div>
-                  ) : (
-                    <div className="divide-y divide-border">
-                      {submissions.map((s) => (
-                        <div key={s.id} className="p-5">
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-medium text-foreground text-sm">User #{s.userId}</span>
-                                <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
-                                  s.paymentMethod === "manual_usdt" ? "bg-primary/10 text-primary" : "bg-accent/10 text-accent"
-                                )}>
-                                  {s.paymentMethod === "manual_usdt" ? "USDT Transfer" : "Cash in Hand"}
-                                </span>
-                                <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
-                                  s.status === "pending" ? "bg-yellow-500/10 text-yellow-500" :
-                                  s.status === "approved" ? "bg-accent/10 text-accent" : "bg-destructive/10 text-destructive"
-                                )}>{s.status}</span>
-                              </div>
-                              <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
-                                {s.paymentMethod === "manual_usdt" ? (
-                                  <>
-                                    <span>Wallet: <span className="text-foreground font-mono">{s.senderWalletAddress ?? "—"}</span></span>
-                                    <span>Network: <span className="text-foreground">{s.blockchainNetwork ?? "—"}</span></span>
-                                    <span>Amount: <span className="text-foreground font-semibold">{s.transferredAmount ? `$${parseFloat(s.transferredAmount).toFixed(2)}` : "—"}</span></span>
-                                    <span>Date: <span className="text-foreground">{s.paymentDateTime ? new Date(s.paymentDateTime).toLocaleString() : "—"}</span></span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span>Ref: <span className="text-foreground font-mono">{s.paymentReferenceNumber ?? "—"}</span></span>
-                                    <span>Collector: <span className="text-foreground">{s.collectorName ?? "—"} (ID: {s.collectorId ?? "—"})</span></span>
-                                    <span>Date: <span className="text-foreground">{s.paymentDate ? new Date(s.paymentDate).toLocaleDateString() : "—"}</span></span>
-                                    {s.remarks && <span className="col-span-2">Remarks: <span className="text-foreground">{s.remarks}</span></span>}
-                                  </>
-                                )}
-                                {s.paymentScreenshotUrl && (
-                                  <a href={s.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline col-span-2">📎 View Screenshot</a>
-                                )}
-                                <span className="text-muted-foreground/60">Submitted: {new Date(s.createdAt).toLocaleString()}</span>
-                              </div>
-                              {s.rejectionReason && (
-                                <p className="mt-2 text-xs text-destructive bg-destructive/5 px-2 py-1 rounded">Rejected: {s.rejectionReason}</p>
-                              )}
-                            </div>
-                            {s.status === "pending" && (
-                              <div className="flex flex-col gap-2 shrink-0">
-                                <Button size="sm" className="h-8 px-3 text-xs" onClick={() => handleSubmissionAction(s.id, "approve")} disabled={actionPending === s.id}>
-                                  <CheckCircle className="w-3 h-3 mr-1" /> Approve
-                                </Button>
-                                <Button size="sm" variant="outline" className="h-8 px-3 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                                  onClick={() => { const reason = prompt("Rejection reason:"); if (reason !== null) handleSubmissionAction(s.id, "reject", reason); }}
-                                  disabled={actionPending === s.id}
-                                >
-                                  <Ban className="w-3 h-3 mr-1" /> Reject
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         )}
 

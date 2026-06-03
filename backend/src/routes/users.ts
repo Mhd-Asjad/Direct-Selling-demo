@@ -140,17 +140,6 @@ router.post("/users/:id/approve-kyc", async (req, res): Promise<void> => {
       return;
     }
 
-    if (updated.isPaid && updated.status === "pending") {
-      const isCoursePackage = updated.packageType === "course_package" || updated.packageType === "course";
-      const bv = isCoursePackage ? 3000 : 30;
-      const comm = isCoursePackage ? 1000 : 30;
-      try {
-        await activateUser(updated.id, bv, comm);
-      } catch (e: any) {
-        console.error(`Failed to activate user ${updated.id} during KYC approval:`, e);
-      }
-    }
-
     res.json(formatUser(updated));
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to approve KYC" });

@@ -10,9 +10,14 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
+const isProduction = process.env.NODE_ENV === "production" || 
+  (process.env.DATABASE_URL && process.env.DATABASE_URL.includes("supabase.co")) || 
+  (process.env.DATABASE_URL && process.env.DATABASE_URL.includes("render.com"));
+
 export const pool = new Pool({ 
   connectionString: process.env.DATABASE_URL,
-  max: 5
+  max: 5,
+  ...(isProduction ? { ssl: { rejectUnauthorized: false } } : {})
 });
 export const db = drizzle(pool, { schema });
 
