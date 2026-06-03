@@ -16,11 +16,13 @@ const isProduction = process.env.NODE_ENV === "production" ||
 
 const maxConnections = process.env.DATABASE_POOL_SIZE 
   ? parseInt(process.env.DATABASE_POOL_SIZE, 10) 
-  : 2;
+  : isProduction ? 1 : 5;
 
 export const pool = new Pool({ 
   connectionString: process.env.DATABASE_URL,
   max: maxConnections,
+  idleTimeoutMillis: 10000,
+  connectionTimeoutMillis: 5000,
   ...(isProduction ? { ssl: { rejectUnauthorized: false } } : {})
 });
 export const db = drizzle(pool, { schema });
