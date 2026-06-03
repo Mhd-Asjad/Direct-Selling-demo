@@ -500,19 +500,7 @@ router.post("/admin/users/:id/approve-kyc", async (req, res): Promise<void> => {
 
   if (!updated) { res.status(404).json({ error: "User not found" }); return; }
 
-  // If the user has already paid (either via Stripe or admin coupon/transfer) 
-  // but their status is still pending, activate them now that KYC is approved.
-  if (updated.isPaid && updated.status === "pending") {
-    const isCoursePackage = updated.packageType === "course_package" || updated.packageType === "course";
-    const bv = isCoursePackage ? 3000 : 30;
-    const comm = isCoursePackage ? 1000 : 30;
-    try {
-      await activateUser(targetId, bv, comm);
-    } catch (e: any) {
-      console.error(`Failed to activate user ${targetId} during KYC approval:`, e);
-      // Even if activation fails, we still want to record the KYC approval
-    }
-  }
+
 
   await db.insert(activityFeedTable).values({
     userId: targetId,

@@ -1,19 +1,26 @@
-import { Client } from "pg";
-import dotenv from "dotenv";
-dotenv.config();
+import { db } from "./src/db/index.js";
+import { networkNodesTable } from "./src/db/schema/network.js";
 
-async function run() {
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
-  await client.connect();
-  try {
-    await client.query("insert into network_nodes (user_id, parent_id, sponsor_id, leg, depth) values (27, 17, 12, 'left', 3)");
-    console.log("Success");
-  } catch (e: any) {
-    console.error("Code:", e.code);
-    console.error("Detail:", e.detail);
-    console.error("Message:", e.message);
-  } finally {
-    await client.end();
+async function main() {
+  const allNodes = await db.select().from(networkNodesTable);
+  const nodeMap = new Map(allNodes.map(n => [n.id, n]));
+  
+  let hasCycle = false;
+  for (const startNode of allNodes) {
+    const visited = new Set<number>();
+    let currentId: number | null | undefined = startNode.parentId;
+    while (currentId) {
+      if (visited.has(currentId)) {
+        console.log("CYCLE DETECTED IN PARENT CHAIN AT NODE", currentId, "STARTING FROM", startNode.id);
+        hasCycle = true;
+        break;
+      }
+      visited.add(currentId);
+      const n = nodeMap.get(currentId);
+      currentId = n?.parentId;
+    }
   }
+  console.log("Has parent cycle?", hasCycle);
+  process.exit(0);
 }
-run();
+main().catch(console.error);
