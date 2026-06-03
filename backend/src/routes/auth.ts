@@ -489,7 +489,7 @@ router.post("/stripe/webhook", async (req, res): Promise<void> => {
     const session = event.data.object as Stripe.Checkout.Session;
     const userIdStr = session.metadata?.userId;
     const sessionType = session.metadata?.type;
-    
+
     if (userIdStr) {
       const userId = parseInt(userIdStr);
       try {
@@ -522,33 +522,33 @@ router.post("/stripe/webhook", async (req, res): Promise<void> => {
         } else {
           // Original logic for $30 fee
           const [updatedUser] = await db
-          .update(usersTable)
-          .set({ isPaid: true })
-          .where(eq(usersTable.id, userId))
-          .returning();
+            .update(usersTable)
+            .set({ isPaid: true })
+            .where(eq(usersTable.id, userId))
+            .returning();
 
-        if (updatedUser) {
-          // Log financial inflow if not already logged
-          const existingInflows = await db
-            .select()
-            .from(financialLedgerTable)
-            .where(
-              and(
-                eq(financialLedgerTable.userId, userId),
-                eq(financialLedgerTable.type, "inflow")
-              )
-            );
+          if (updatedUser) {
+            // Log financial inflow if not already logged
+            const existingInflows = await db
+              .select()
+              .from(financialLedgerTable)
+              .where(
+                and(
+                  eq(financialLedgerTable.userId, userId),
+                  eq(financialLedgerTable.type, "inflow")
+                )
+              );
 
-          if (existingInflows.length === 0) {
-            await db.insert(financialLedgerTable).values({
-              type: "inflow",
-              amount: "30.00",
-              description: `Registration fee from ${updatedUser.firstName} ${updatedUser.lastName} via Stripe (Pending KYC)`,
-              userId: updatedUser.id,
-            });
+            if (existingInflows.length === 0) {
+              await db.insert(financialLedgerTable).values({
+                type: "inflow",
+                amount: "30.00",
+                description: `Registration fee from ${updatedUser.firstName} ${updatedUser.lastName} via Stripe (Pending KYC)`,
+                userId: updatedUser.id,
+              });
+            }
+            logger.info(`Successfully recorded Stripe payment for user ${userId} via Webhook (Pending KYC)`);
           }
-          logger.info(`Successfully recorded Stripe payment for user ${userId} via Webhook (Pending KYC)`);
-        }
         } // Close else block
       } catch (err: any) {
         logger.error(`Failed to record Stripe payment/coupons for user ${userId} in webhook: ${err.message}`);
@@ -577,7 +577,6 @@ router.post("/auth/redeem-activation-coupons", async (req, res): Promise<void> =
     .from(couponsTable)
     .where(
       and(
-        eq(couponsTable.userId, userId),
         eq(couponsTable.status, "active"),
         eq(couponsTable.couponType, "activation"),
         inArray(couponsTable.code, [coupon1, coupon2])
@@ -585,7 +584,7 @@ router.post("/auth/redeem-activation-coupons", async (req, res): Promise<void> =
     );
 
   if (coupons.length !== 2) {
-    res.status(400).json({ error: "Invalid, inactive, or mismatched coupons. Both must be active activation coupons owned by you." });
+    res.status(400).json({ error: "Invalid, inactive, or mismatched coupons. Both must be active activation coupons." });
     return;
   }
 

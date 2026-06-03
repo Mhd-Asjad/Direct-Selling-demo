@@ -279,11 +279,7 @@ router.post("/wallet/coupons/redeem", async (req, res): Promise<void> => {
     return;
   }
 
-  // Ownership check — user can only redeem their own coupons
-  if (coupon.userId !== userId) {
-    res.status(403).json({ error: "This coupon does not belong to your account" });
-    return;
-  }
+  // Coupons can be redeemed by any active user. The code is the bearer token.
 
   if (coupon.status !== "active") {
     res.status(400).json({ error: "Coupon is already used or expired" });
