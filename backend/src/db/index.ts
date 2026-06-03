@@ -14,9 +14,13 @@ const isProduction = process.env.NODE_ENV === "production" ||
   (process.env.DATABASE_URL && process.env.DATABASE_URL.includes("supabase.co")) || 
   (process.env.DATABASE_URL && process.env.DATABASE_URL.includes("render.com"));
 
+const maxConnections = process.env.DATABASE_POOL_SIZE 
+  ? parseInt(process.env.DATABASE_POOL_SIZE, 10) 
+  : 2;
+
 export const pool = new Pool({ 
   connectionString: process.env.DATABASE_URL,
-  max: 5,
+  max: maxConnections,
   ...(isProduction ? { ssl: { rejectUnauthorized: false } } : {})
 });
 export const db = drizzle(pool, { schema });
